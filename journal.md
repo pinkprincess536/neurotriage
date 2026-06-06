@@ -173,4 +173,90 @@ Inference is the moment the system actually helps a doctor. Without it, the mode
 
 ---
 
+## 6. Threshold Tuning
+
+### What is argmax?
+
+`argmax` picks the index of the biggest number. Always. No exceptions.
+
+```python
+scores = [0.35, 0.65]      # [normal_score, seizure_score]
+argmax  →  1               # index 1 is bigger (0.65 > 0.35)
+
+scores = [0.88, 0.12]
+argmax  →  0               # index 0 is bigger
+
+scores = [0.49, 0.51]
+argmax  →  1               # seizure — barely, but still seizure
+```
+
+It doesn't care about confidence. [0.49, 0.51] and [0.01, 0.99] produce the same answer: seizure. One is 51% sure, one is 99% sure. Same result.
+
+### What is a model score?
+
+Every window produces two numbers from the model: [normal_confidence, seizure_confidence]. The "score" is the second one — the seizure probability, from 0.0 to 1.0.
+
+```
+Window A:  [0.95, 0.05]  → 5% chance of seizure  → normal
+Window B:  [0.49, 0.51]  → 51% chance of seizure → barely seizure
+Window C:  [0.02, 0.98]  → 98% chance of seizure → almost certainly seizure
+```
+
+### What is threshold tuning?
+
+Instead of the fixed argmax rule ("51% = seizure"), you set a custom bar:
+
+```
+"Only show me windows where seizure probability > 0.85"
+```
+
+| Threshold | What happens |
+|-----------|-------------|
+| 0.50 | Default argmax. Catches everything but lots of false alarms. |
+| 0.80 | Fewer false alarms but might miss subtle seizures. |
+| 0.95 | Almost no false alarms but misses many seizures. |
+
+It's a slider — you trade one kind of error for another.
+
+### The ML principle: Precision-Recall Tradeoff
+
+There's no free lunch. As you catch more seizures (higher recall), you also flag more false alarms (lower precision). The threshold is where you pick your spot on that tradeoff.
+
+It's also **cost-sensitive decision making**: not all errors are equal.
+
+| Error | Cost |
+|-------|------|
+| Missed seizure (FN) | Patient harm. Catastrophic. |
+| False alarm (FP) | Doctor wastes 10 seconds. Annoying. |
+
+The threshold encodes this asymmetry. Missing a seizure is 1000x worse than a false alarm, so you might tolerate 50 false alarms per hour to guarantee you catch every seizure.
+
+### In your EEG project
+
+Current `train_eeg.ipynb` uses `argmax` — fixed at 0.50. With threshold tuning added:
+
+1. After each training run, test multiple thresholds (0.50, 0.60, ..., 0.95)
+2. For each threshold, calculate recall + false alarms per hour
+3. Print a table so the doctor can pick their preferred balance
+4. Store the chosen threshold in `model_config.json`
+5. At inference time, use that threshold instead of argmax
+
+### Three-tier triage (future)
+
+Instead of one threshold, use three:
+
+| Tier | Threshold | Meaning |
+|------|-----------|---------|
+| 🔴 Urgent | > 0.95 | Almost certainly seizure — look now |
+| 🟡 Review | 0.50–0.95 | Might be seizure — review when possible |
+| ⬜ Hidden | < 0.50 | Very likely normal — never shown |
+
+The doctor skips straight to Red, confirms in seconds, then browses Yellow if time allows.
+
+### The feedback loop connection
+
+Every time the doctor clicks ✓ or ✗, the system stores the model score alongside the decision. Over time, it learns: "for this doctor, on this EEG machine, anything below 0.55 is always a false alarm." The thresholds auto-adjust.
+
+---
+
 *Updated: June 2026*
