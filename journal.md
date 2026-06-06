@@ -253,6 +253,30 @@ Instead of one threshold, use three:
 
 The doctor skips straight to Red, confirms in seconds, then browses Yellow if time allows.
 
+### False alarms per hour (FA/hr)
+
+FA/hr is the clinical metric that matters. Accuracy on a balanced test set tells you nothing about real-world performance. FA/hr tells you how many wrong flags a doctor has to dismiss.
+
+**How it's calculated:**
+
+```python
+window_sec = 7.0                  # each window = 7 seconds of EEG
+stride_sec = 7.0 * (1 - 0.3)     # windows start every 4.9 seconds (30% overlap)
+windows_per_hour = 3600 / 4.9    # ~735 windows per hour of EEG
+
+fa_per_hour = (false_positives / total_windows) * windows_per_hour
+```
+
+Example: test set has 536 windows, 75 false positives:
+
+```
+75 / 536 * 735 = 103 false alarms per hour
+```
+
+That means the doctor has to dismiss ~103 normal windows every hour. At threshold 0.95, that drops to ~7. The tradeoff is how many real seizures you miss at that threshold.
+
+This is the number that determines whether the triage assistant is actually usable in a clinic. A model with 95% accuracy but 200 FA/hr is useless — the doctor spends more time dismissing false alarms than reading raw EEG.
+
 ### The feedback loop connection
 
 Every time the doctor clicks ✓ or ✗, the system stores the model score alongside the decision. Over time, it learns: "for this doctor, on this EEG machine, anything below 0.55 is always a false alarm." The thresholds auto-adjust.
