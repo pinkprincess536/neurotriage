@@ -129,6 +129,8 @@ The fix: two extra `np.save()` lines in `preprocess.ipynb`.
 
 **Inference** = actually driving on the road. You see a stop sign and react instantly. You don't re-read the manual at every intersection.
 
+> Training is the rehearsal. Inference is the performance. Without it, you're just a band that only practices in the garage.
+
 ### Real-life examples
 
 | System | Training | Inference |
