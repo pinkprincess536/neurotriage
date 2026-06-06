@@ -1,5 +1,5 @@
 # Learning Journal — EEG Seizure Triage Project
-##everything ive learned so far while making this :)) feel free to read <3
+everything ive learned so far while making this :)) feel free to read <3
 ---
 
 ## 1. Normalization (Z-Score Normalization)
