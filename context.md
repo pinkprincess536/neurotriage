@@ -1,302 +1,239 @@
-# CLAUDE.md
+# CONTEXT.md — EEG Seizure Triage Assistant
 
-## Project Overview
-
-The project is an **EEG Seizure Triage Assistant**.
-
-Core idea (user intent preserved):
-> "We want to build a tool that helps doctors who read EEG (brainwave) recordings."
-
-Problem being solved:
-- Neurologists manually review **hours of EEG recordings** to find short seizure events.
-- This process is **slow and cognitively exhausting**.
-
-Proposed system:
-- Takes long EEG recordings
-- Automatically identifies segments that “look like” seizures
-- Ranks and surfaces the most relevant segments first
-- Provides a clean interface for review
-- Learns from doctor feedback over time
-
-> "The goal is not just to detect seizures once. The goal is to help doctors work faster and smarter every day by giving them a triage assistant that sits between raw data and final decisions." :contentReference[oaicite:0]{index=0}
-
+*For LLM agents working on this project. Read this first.*
 
 ---
 
-## What Already Exists
+## 1. Project Summary
 
-The project builds on:
+Building an **EEG Seizure Triage Assistant** — a system that takes long EEG recordings, automatically identifies seizure-like segments, ranks them, and surfaces the most relevant ones to a neurologist for review. Collects doctor feedback and improves over time.
 
-### Datasets
-- CHB-MIT EEG dataset
+**Current phase:** Data pipeline + model training complete. Working on production-readiness (saving artifacts, scaling to 24 patients, realistic evaluation, threshold tuning). Backend/frontend not started.
 
-These provide:
-- Large-scale labeled seizure data
-- Real clinical EEG recordings
-
-### Research + Code
-- Existing seizure detection pipelines (CNNs, signal processing)
-- Open-source implementations for preprocessing and training
-
-### Evaluation Frameworks
-- Metrics like:
-  - Sensitivity (recall)
-  - False alarms per hour
-  - AUROC
-- Frameworks like SzCORE
-
-Key takeaway:
-- Detection models exist
-- End-to-end usable systems do not
-
+**GitHub:** `pinkprincess536/eeg` | **Dataset:** CHB-MIT (24 patients, 22-channel bipolar EEG)
 
 ---
 
-## Gap This Project Fills
+## 2. Files & Purpose
 
-Most existing work stops at:
-- Offline experiments
-- Research metrics
-- Scripts and notebooks
-
-Missing piece:
-> A real, usable triage assistant with workflow, UI, and feedback loop
-
-This project focuses on:
-- Productization
-- MLOps system design
-- Human-in-the-loop learning
-
-
----
-
-## System Architecture
-
-### 1. Data Pipeline
-
-Tasks:
-- Download TUH / CHB-MIT datasets
-- Read raw `.edf` EEG files
-- Preprocess signals:
-  - Bandpass filtering (0.5–40 Hz)
-  - Notch filtering
-  - Artifact removal
-- Slice into windows (5–30 seconds)
-- Align seizure annotations
-
-Output:
-- Structured dataset of labeled EEG segments
-
+| File | Purpose | Status |
+|------|---------|--------|
+| `preprocess.ipynb` | Download (S3) + preprocess EEG + save .npy to Drive | **Production** |
+| `train_eeg.ipynb` | Load .npy on Kaggle + train 1D CNN + threshold sweep + save model | **Production** |
+| `eeg.ipynb` | Legacy all-in-one Colab notebook (no channel standardization) | Archive |
+| `preprocessing.py` | Spectrogram pipeline (unused — project uses 1D CNN on raw windows) | Stale |
+| `test_eeg.py` | Unit tests | Reference |
+| `journal.md` | Learning journal — normalization, inference, threshold tuning concepts | Reference |
+| `workflow.md` | Doctor workflow design — triage tiers, feedback loop | Reference |
+| `PIPELINE_CHANGES.md` | Stakeholder summary of 7 pipeline fixes | Reference |
+| `DVC_GUIDE.md` | DVC setup and workflow guide | Reference |
+| `PLATFORMS.md` | Colab vs Kaggle vs RunPod comparison | Reference |
+| `context.md` | This file | LLM context |
 
 ---
 
-### 2. Feature Engineering
+## 3. Data Pipeline Flow
 
-Approach:
-- Convert EEG signals into time-frequency representations
+```
+PhysioNet S3 bucket
+  │  aws s3 sync (20 parallel, chunked)
+  ▼
+Google Drive: /MyDrive/EEG_PROJECT/
+  │  raw .edf files (chb01/ ... chb24/ + summary.txt)
+  ▼
+Colab: preprocess.ipynb
+  │  bandpass filter 0.5-40Hz → notch 60Hz → slice 7s windows (30% overlap)
+  │  → pad to 22 channels → label from summary.txt
+  │  → per-channel z-score normalize → save .npy to Drive
+  ▼
+Google Drive: /MyDrive/EEG_PROJECT/processed/
+  │  X_train.npy, y_train.npy, X_test.npy, y_test.npy
+  │  train_mean.npy, train_std.npy, channel_names.npy, info.txt
+  ▼
+Upload to Kaggle Dataset (manual or API)
+  ▼
+Kaggle: train_eeg.ipynb
+  │  load .npy → 1D CNN → MLflow tracking → threshold sweep → save model
+  ▼
+/kaggle/working/model/
+     eegcnn1d_weights.pth, model_config.json, test_metrics.json
+```
 
-Techniques:
-- STFT (Short-Time Fourier Transform)
-- Spectrogram generation
-
-Reason:
-- Enables CNN-based learning (image-like input)
-
-
----
-
-### 3. Model Training
-
-Baseline:
-- CNN trained on spectrograms
-
-Capabilities:
-- Binary classification (seizure vs non-seizure)
-- Handle class imbalance
-- Evaluate using domain-relevant metrics
-
-Tracking:
-- MLflow for:
-  - Parameters
-  - Metrics
-  - Model versions
-
+**Kaggle never needs raw 55 GB .edf files.** Only `processed/` (~2-5 GB) is uploaded.
 
 ---
 
-### 4. Backend Service (Inference Layer)
+## 4. Current Configuration
 
-Technology:
-- FastAPI
+### preprocess.ipynb — Key Variables
 
-Endpoints:
-- `POST /predict`
-- `GET /recordings`
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `PATIENT_RANGE` | `range(1, 25)` | All 24 patients. Change to `range(1,12)` for quick runs |
+| `TRAIN_PATIENTS` | 9 (from shuffle seed=42) | 9 train / 15 test split |
+| `TEST_PATIENTS` | 15 (from shuffle seed=42) | |
+| `WINDOW_SIZE_SEC` | 7.0 | 1792 samples at 256 Hz |
+| `OVERLAP` | 0.3 | |
+| `LOWCUT / HIGHCUT` | 0.5 / 40.0 Hz | |
+| `NOTCH_FREQ` | 60.0 Hz | |
+| `NON_SEIZURE_SAMPLES` | 500 | Training: balanced |
+| `NON_SEIZURE_SAMPLES_TEST` | 9000 | Test: capped for RAM, captures ~27% of non-seizure windows |
+| `EEG_CHANNELS` | 22 channels | T8-P8 duplicate removed; list in Cell 7 |
+| `BASE_DIR` | `/content/drive/MyDrive/EEG_PROJECT` | |
 
-Behavior:
-- Load model at startup
-- Process full EEG recordings
-- Return ranked seizure segments
+### train_eeg.ipynb — Key Variables
 
-Scaling:
-- Use async jobs (Celery + Redis)
-
-
----
-
-### 5. Frontend (Triage UI)
-
-Goal:
-> "Don't over-engineer the UI."
-
-Recommended:
-- Streamlit for speed
-
-Features:
-- Patient selection
-- Recording selection
-- Ranked segment list
-- EEG waveform viewer
-- Feedback buttons:
-  - "True seizure"
-  - "Not a seizure"
-
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `DATA_DIR` | `/kaggle/input/datasets/rebelxhearts/23-patient-final/processed` | **Needs update** to new dataset |
+| `BATCH_SIZE` | 8 | |
+| `LEARNING_RATE` | 0.001 | |
+| `NUM_EPOCHS` | 10 | |
+| `SEIZURE_WEIGHT` | 7.0 | Default; loop tests [5.0, 7.5, 7.8, 9.0] |
+| `WEIGHTS_TO_TEST` | [5.0, 7.8, 7.5, 9.0] | MLflow experiment: `seizure-weight-comparison` |
 
 ---
 
-### 6. Feedback Loop
+## 5. Model Architecture
 
-Core idea:
-- System improves through usage
+**EEGCNN1D** — 3 Conv1d blocks + fully connected classifier.
 
-Mechanism:
-- Store doctor feedback
-- Link feedback to segments
-- Use feedback to:
-  - Retrain models
-  - Adjust thresholds
+```
+Input: (batch, 22 channels, 1792 time samples)
 
-Trigger:
-- Retrain after sufficient new labels
+Block 1: Conv1d(22→32, k=7) → BatchNorm → ReLU → MaxPool(4)  → (B,32,448)
+Block 2: Conv1d(32→64, k=5) → BatchNorm → ReLU → MaxPool(4)  → (B,64,112)
+Block 3: Conv1d(64→128, k=3) → BatchNorm → ReLU → AdaptiveAvgPool1d(16) → (B,128,16)
+Flatten → Dropout(0.4) → FC(2048→64) → ReLU → Dropout(0.3) → FC(64→2)
+Output: (batch, 2) [normal_score, seizure_score]
+```
 
-
----
-
-### 7. MLOps Infrastructure
-
-Foundation includes:
-
-#### Versioning
-- Git for code
-- DVC for datasets
-
-#### Experiment Tracking
-- MLflow
-
-#### Containerization
-- Docker + docker-compose
-
-#### CI/CD
-- GitHub Actions:
-  - Test
-  - Build
-  - Deploy
-
-#### Monitoring
-- Track:
-  - Prediction drift
-  - False alarm rate
-  - Data distribution changes
-
-- Tools:
-  - Prometheus
-  - Grafana
-
+~300K parameters. Augmentation on seizure windows only: time shift ±200ms, amplitude ×0.85-1.15, Gaussian noise σ=0.01.
 
 ---
 
-## Development Roadmap
+## 6. Notebook: preprocess.ipynb (Cell Reference)
 
-### Phase 1 — Foundation (Week 1–2)
-- Python environment setup
-- Git + GitHub
-- Docker basics
-- Explore EEG data
-
-### Phase 2 — Data Pipeline (Week 2–4)
-- Signal preprocessing
-- Windowing + labeling
-- Feature extraction
-- Data versioning (DVC)
-
-### Phase 3 — Modeling (Week 3–5)
-- Train CNN baseline
-- Track experiments (MLflow)
-- Proper evaluation metrics
-
-### Phase 4 — Backend (Week 5–7)
-- FastAPI service
-- Dockerization
-- Async job queue
-
-### Phase 5 — Frontend (Week 7–9)
-- Streamlit dashboard
-- EEG visualization
-- Feedback capture
-
-### Phase 6 — Feedback Loop (Week 9–11)
-- Retraining pipeline
-- Threshold tuning
-
-### Phase 7 — Monitoring & CI/CD (Week 11–13)
-- Model monitoring
-- Data drift detection
-- CI/CD pipelines
-
-
-Reference roadmap UI: :contentReference[oaicite:1]{index=1}
-
+| Cell | Name | What it does |
+|------|------|-------------|
+| 1 | Config | All tunable parameters. Patient split, window settings, balancing |
+| 2 | S3 Sync | Downloads all 24 patients from PhysioNet S3 to Drive (20 parallel, skips existing) |
+| 3 | Parse Annotations | Reads summary.txt per patient, builds SEIZURE_MAP |
+| 4 | bandpass_filter() | Filters full recording before windowing |
+| 5 | create_windows() | Slices filtered signal into 7s overlapping windows |
+| 6 | create_labels() | Labels each window as seizure/non-seizure based on annotations |
+| 7 | process_recording() | Full pipeline per .edf: load → pick channels → filter → window → pad → label |
+| 8 | preprocess_streaming() | RAM-safe processing: reservoir samples non-seizure, keeps all seizures |
+| 9 | Train Set | Runs preprocess_streaming on TRAIN_PATIENTS (balanced, 500 non-seizure cap) |
+| 10 | Test Set | Runs preprocess_streaming on TEST_PATIENTS (realistic, 9000 non-seizure cap) |
+| 11 | Normalize | Per-channel z-score from train stats, applied to train + test |
+| 12 | Save | Saves .npy + norm stats + channel_names + info.txt to Drive |
+| 13 | DVC | Tracks + pushes dataset version (runs in Drive-only git, not GitHub) |
 
 ---
 
-## Key Design Principles
+## 7. Notebook: train_eeg.ipynb (Cell Reference)
 
-- Focus on **end-to-end system**, not just model accuracy
-- Prioritize **doctor workflow usability**
-- Build **feedback-driven improvement loop**
-- Treat project as **real MLOps system**, not a notebook experiment
-- Avoid over-engineering early (especially frontend)
-
-
----
-
-## User Context (Behavior & Preferences)
-
-- The user is:
-  - Learning by building real systems
-  - Focused on practical, production-style implementations
-  - Working across frontend + backend + ML stack
-
-- Existing parallel work:
-  - Debugging Supabase-connected admin dashboard
-  - Building projects to compensate for weak teaching quality
-
-- Learning style:
-  - Prefers step-by-step actionable guidance
-  - Values real-world architecture over theory
-
+| Cell | Name | What it does |
+|------|------|-------------|
+| - | Kaggle Auth | `kagglehub.login()` + dataset download |
+| 1 | Config | Training params, paths, seizure weight |
+| 1b | DVC Pull | Optional — pull latest dataset from Drive (currently broken) |
+| 2 | Load Data | Loads X_train/X_test .npy files |
+| 3 | Augmentation | `augment_seizure()` function |
+| 4 | DataLoader | PyTorch tensors + DataLoader |
+| 5 | Model | EEGCNN1D class definition |
+| 6 | Training | Loop over WEIGHTS_TO_TEST: train → evaluate → MLflow logging → threshold sweep |
+| 7 | Save Model | Saves weights.pth + model_config.json + test_metrics.json to /kaggle/working/model/ |
 
 ---
 
-## Expected End State
+## 8. Recent Fixes Applied
 
-A system that:
+| # | Fix | Where | Impact |
+|---|-----|-------|--------|
+| 1 | Save normalization stats | preprocess Cell 12 | Enables inference on new EEG |
+| 2 | Save model with config + metrics | train_eeg last cell | Model exportable, reloadable anywhere |
+| 3 | Remove duplicate T8-P8 channel | preprocess Cell 7 | 22 unique channels instead of 23-with-duplicate |
+| 4 | Pass overlap param to create_labels | preprocess Cells 6,7 | Labels respect OVERLAP config |
+| 5 | Consistent return values | preprocess Cell 7 | Bad recordings skipped, not crashed |
+| 6 | Save canonical channel names | preprocess Cell 8 | EEG_CHANNELS list, not per-file garbage |
+| 7 | Threshold tuning sweep | train_eeg Cell 6 | FA/hr table for clinical decision-making |
+| 8 | Unbalanced test evaluation | preprocess Cell 1,10 | Test set now realistic (9000 non-seizure cap) |
+| 9 | S3 sync download | preprocess Cell 2 | 20-parallel, 3-5x faster than wget |
+| 10 | Fix channel padding dimensions | preprocess Cell 7 | Pad along channel axis, not window axis |
+| 11 | Fix f-string newline errors | Both notebooks | `print("\n" + f"...")` pattern |
 
-- Accepts EEG recordings
-- Automatically detects and ranks seizure-like segments
-- Provides a usable triage interface for doctors
-- Collects feedback
-- Continuously improves through retraining
-- Operates with full MLOps lifecycle
+---
 
-> "We will build the bridge from that detection capability to a usable, end-to-end tool for doctors, with data pipelines, services, a user interface, feedback, and monitoring." :contentReference[oaicite:2]{index=2}
+## 9. Known Issues & Workarounds
+
+| Issue | Impact | Workaround |
+|-------|--------|------------|
+| **RAM crash on large test set** | Colab OOM with 15 patients + unlimited non-seizure | Capped at 9000. Need checkpoint streaming for full capture |
+| **f-string `\n` syntax error** | Syntax error in Colab Python | Use `print("\n" + f"...")` pattern everywhere |
+| **DVC not in GitHub** | DVC runs in separate Drive-only git repo | .dvc files not in pinkprincess536/eeg. Needs one-time setup |
+| **train_eeg uses old dataset** | `DATA_DIR` points at rebelxhearts/23-patient-final | Update after uploading new processed/ folder |
+| **JSON corruption from edit tools** | Notebooks can break when edited as text | Always validate with `json.load()` after edits |
+| **Edit tool double-escapes backslashes** | `.ipynb` files get `\\n` instead of `\n` | Use Python `json.load/dump` for all notebook edits |
+
+---
+
+## 10. Key Technical Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| 1D CNN on raw windows (not spectrograms) | Simpler, fewer dependencies. spectrogram pipeline (`preprocessing.py`) is stale |
+| S3 sync over wget | 20 parallel, 3-5x faster, skips unused .seizures files |
+| Colab preprocess + Kaggle train | Colab has native Drive mount. Kaggle has 9hr batch mode |
+| 22 channels (not 23) | T8-P8 was duplicated. 22 unique channels, pad to standardize |
+| Option B for test set (None-capable list) | No RAM waste, scales to any patient count. Capped at 9000 for Colab limits |
+| Reservoir sampling (not full collect) | Prevents overfitting on non-seizure, keeps RAM manageable |
+| Per-channel z-score from train only | No test leakage. Stats saved for inference |
+| Threshold tuning via probability sweep | Clinical workflow: doctor picks recall vs FA/hr balance |
+
+---
+
+## 11. Commands & Setup
+
+### GitHub
+```
+git clone https://github.com/pinkprincess536/eeg.git
+```
+Branch: `main` | Email: `f24ce245@ms.pict.edu`
+
+### Colab (preprocess)
+1. Open `preprocess.ipynb` from GitHub in Colab
+2. Run cells top to bottom
+3. Download `processed/` folder from Drive
+
+### Kaggle (train)
+1. Upload `processed/` as Kaggle Dataset
+2. Update `DATA_DIR` in `train_eeg.ipynb` to point at dataset
+3. Run cells top to bottom
+4. Download `/kaggle/working/model/` before session ends
+
+### Reload trained model for inference
+```python
+config = json.load(open("model_config.json"))
+model = EEGCNN1D(n_channels=config["n_channels"])
+model.load_state_dict(torch.load("eegcnn1d_weights.pth"))
+model.eval()
+
+# Normalize new data with saved stats
+train_mean = np.load("train_mean.npy")
+train_std  = np.load("train_std.npy")
+X_new = (X_new - train_mean) / (train_std + 1e-8)
+```
+
+---
+
+## 12. Next Steps (Priority Order)
+
+1. Upload updated `processed/` to Kaggle + update `DATA_DIR`
+2. Fix DVC: connect to GitHub repo (one-time setup)
+3. Add checkpoint streaming for test preprocessing (eliminate 9000 cap)
+4. Implement download speedups from `DOWNLOAD_SPEEDUP.md`
+5. Backend (FastAPI inference endpoint)
+6. Frontend (Streamlit triage UI)
+7. Feedback loop (store doctor ✓/✗, retrain)
