@@ -290,3 +290,32 @@ Three concrete benefits:
 3. **Change isolation.** If you want to add a webhook notification after predicting, you edit the endpoint. If you want to change how filtering works, you edit the function. Neither change risks breaking the other.
 
 This is **separation of concerns**: each piece of code owns exactly one job.
+
+
+**READING ERROR**
+┌─── (1) THE TYPE ──────────────────────────┐
+│  ImportError: cannot import name           │
+│  'asynccotextmanager' from 'contextlib'    │
+└────────────────────────────────────────────┘
+
+            Tells you WHAT went wrong.
+            "ImportError" = something wrong with an import.
+            "cannot import name X from Y" = X doesn't exist in Y.
+
+┌─── (2) THE FIX ───────────────────────────┐
+│  Did you mean: 'asynccontextmanager'?      │
+└────────────────────────────────────────────┘
+
+            Python GUESSES what you meant.
+            Always read this line first — it's right 90% of the time.
+
+┌─── (3) THE LOCATION ──────────────────────┐
+│  File "backend.py", line 3                │
+└────────────────────────────────────────────┘
+
+            Tells you WHERE the error is.
+            Line 3 of backend.py.
+            The traceback shows the call stack from bottom to top —
+            start reading from the bottom, find YOUR code.
+
+
