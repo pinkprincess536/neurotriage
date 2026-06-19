@@ -60,8 +60,8 @@ export default function ResultsTable({ data }) {
                   <span>{feedback[r.rank] === "yes" ? "✓ Seizure" : "✗ Not seizure"}</span>
                 ) : (
                   <>
-                    <button onClick={() => handleFeedback(r.rank, "yes")}>✓</button>
-                    <button onClick={() => handleFeedback(r.rank, "no")}>✗</button>
+                    <button onClick={() => handleFeedback(r, "yes")}>✓</button>
+                    <button onClick={() => handleFeedback(r, "no")}>✗</button>
                   </>
                 )}
               </td>

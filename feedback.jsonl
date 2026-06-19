@@ -1,0 +1,2 @@
+{"timestamp_sec": 10.5, "model_score": 0.9, "doctor_label": "seizure", "recording": "demo", "model_version": "v1", "submitted_at": "2026-06-19T16:46:50.386995+00:00"}
+{"timestamp_sec": 1743.8, "model_score": 0.9612, "doctor_label": "seizure", "recording": "demo-recording", "model_version": "v1", "submitted_at": "2026-06-19T16:47:55.839001+00:00"}

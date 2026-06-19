@@ -215,6 +215,11 @@ async def predict(file: UploadFile, threshold: float = 0.70):
 @app.post("/feedback")
 async def save_feedback(request: Request):
     data = await request.json()
+    # #region agent log
+    import time as _t
+    with open("debug-2b6d4f.log", "a") as _lf:
+        _lf.write(json.dumps({"sessionId":"2b6d4f","hypothesisId":"H2","location":"backend.py:save_feedback","message":"feedback received","data":{"keys":list(data.keys()),"timestamp_sec":data.get("timestamp_sec"),"score":data.get("score")},"timestamp":int(_t.time()*1000)}) + "\n")
+    # #endregion
     entry = {
         "timestamp_sec": data["timestamp_sec"],
         "model_score": data["score"],
