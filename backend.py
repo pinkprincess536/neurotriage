@@ -1,8 +1,10 @@
-from fastapi import FastAPI,UploadFile,Query,Body
+from fastapi import FastAPI,UploadFile,Query,Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import tempfile
 import os
+import json
+from datetime import datetime, timezone
 import numpy as np
 import torch
 import torch.nn as nn
@@ -166,20 +168,6 @@ app.add_middleware(
 def health():
     return {"status": "ok", "model_loaded": model is not None}
 
-@app.post("/feedback")
-async def save_feedback(data: dict = Body(...)):
-    entry = {
-        "timestamp_sec": data["timestamp_sec"],
-        "model_score": data["score"],
-        "doctor_label": data["label"],
-        "recording": data.get("recording", "unknown"),
-        "model_version": "v1",
-        "submitted_at": datetime.utcnow().isoformat(),
-    }
-    with open("feedback.jsonl", "a") as f:
-        f.write(json.dumps(entry) + "\n")
-    return {"status": "saved"}
-
 @app.post("/predict")
 async def predict(file: UploadFile, threshold: float = 0.70):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".edf") as tmp:
@@ -222,4 +210,20 @@ async def predict(file: UploadFile, threshold: float = 0.70):
 
     finally:
         os.unlink(tmp_path)
+
+
+@app.post("/feedback")
+async def save_feedback(request: Request):
+    data = await request.json()
+    entry = {
+        "timestamp_sec": data["timestamp_sec"],
+        "model_score": data["score"],
+        "doctor_label": data["label"],
+        "recording": data.get("recording", "unknown"),
+        "model_version": "v1",
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open("feedback.jsonl", "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return {"status": "saved"}
 
