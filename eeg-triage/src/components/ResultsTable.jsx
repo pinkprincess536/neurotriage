@@ -3,9 +3,28 @@ import { useState } from "react";
 export default function ResultsTable({ data }) {
   const [feedback, setFeedback] = useState({});
 
-  const handleFeedback = (rank, label) => {
-    setFeedback((prev) => ({ ...prev, [rank]: label }));
-  };
+  const handleFeedback = async (r, label) => {
+  const labelValue = label === "yes" ? "seizure" : "normal";
+
+  // Update UI immediately (optimistic update)
+  setFeedback(prev => ({ ...prev, [r.rank]: label }));
+
+  // Save to backend
+  try {
+    await fetch("http://localhost:8000/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        timestamp_sec: r.timestamp_sec,
+        score: r.score,
+        label: labelValue,
+        recording: "demo-recording",
+      }),
+    });
+  } catch (err) {
+    console.error("Feedback save failed:", err);
+  }
+};
 
   const tierLabel = (tier) => (tier === "urgent" ? "🔴 Urgent" : "🟡 Review");
 

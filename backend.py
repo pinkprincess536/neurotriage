@@ -1,4 +1,4 @@
-from fastapi import FastAPI,UploadFile,Query
+from fastapi import FastAPI,UploadFile,Query,Body
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import tempfile
@@ -165,6 +165,20 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": model is not None}
+
+@app.post("/feedback")
+async def save_feedback(data: dict = Body(...)):
+    entry = {
+        "timestamp_sec": data["timestamp_sec"],
+        "model_score": data["score"],
+        "doctor_label": data["label"],
+        "recording": data.get("recording", "unknown"),
+        "model_version": "v1",
+        "submitted_at": datetime.utcnow().isoformat(),
+    }
+    with open("feedback.jsonl", "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return {"status": "saved"}
 
 @app.post("/predict")
 async def predict(file: UploadFile, threshold: float = 0.70):
