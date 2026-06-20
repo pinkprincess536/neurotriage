@@ -15,10 +15,10 @@ export default function ResultsTable({ data }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        recording_id: data.recording_id,
         timestamp_sec: r.timestamp_sec,
         score: r.score,
         label: labelValue,
-        recording: "demo-recording",
       }),
     });
   } catch (err) {
