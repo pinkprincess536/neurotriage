@@ -1,4 +1,6 @@
 import { useState } from "react";
+import Login from "./components/Login";
+import PatientManager from "./components/PatientManager";
 import FileUpload from "./components/FileUpload";
 import ThresholdSlider from "./components/ThresholdSlider";
 import ResultsTable from "./components/ResultsTable";
@@ -7,14 +9,30 @@ import "./App.css";
 const BACKEND_URL = "http://localhost:8000";
 
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem("doctor_token"));
+  const [patientId, setPatientId] = useState(null);
   const [file, setFile] = useState(null);
   const [threshold, setThreshold] = useState(0.7);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const handleLogin = (userToken) => {
+    localStorage.setItem("doctor_token", userToken);
+    setToken(userToken);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("doctor_token");
+    setToken(null);
+    setPatientId(null);
+    setFile(null);
+    setResults(null);
+    setError(null);
+  };
+
   const handleProcess = async () => {
-    if (!file) return;
+    if (!file || !patientId) return;
     setLoading(true);
     setError(null);
     setResults(null);
@@ -24,7 +42,7 @@ export default function App() {
       formData.append("file", file);
 
       const response = await fetch(
-        `${BACKEND_URL}/predict?threshold=${threshold}`,
+        `${BACKEND_URL}/patients/${patientId}/upload?threshold=${threshold}`,
         { method: "POST", body: formData }
       );
 
@@ -42,25 +60,39 @@ export default function App() {
     }
   };
 
+  if (!token) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
     <div className="app">
-      <h1>EEG Seizure Triage Assistant</h1>
+      <header className="app-header">
+        <h1>EEG Seizure Triage Assistant</h1>
+        <button className="logout-btn" onClick={handleLogout}>
+          Sign Out
+        </button>
+      </header>
 
-      <FileUpload file={file} onFileSelect={setFile} />
+      <div className="dashboard-content">
+        <PatientManager patientId={patientId} onSelect={setPatientId} />
 
-      <ThresholdSlider threshold={threshold} onChange={setThreshold} />
+        <FileUpload file={file} onFileSelect={setFile} />
 
-      <button
-        className="process-btn"
-        onClick={handleProcess}
-        disabled={!file || loading}
-      >
-        {loading ? "Processing..." : "Process Recording"}
-      </button>
+        <ThresholdSlider threshold={threshold} onChange={setThreshold} />
 
-      {error && <div className="error">{error}</div>}
+        <button
+          className="process-btn"
+          onClick={handleProcess}
+          disabled={!file || !patientId || loading}
+        >
+          {loading ? "Processing..." : "Process Recording"}
+        </button>
 
-      {results && <ResultsTable data={results} />}
+        {error && <div className="error">{error}</div>}
+
+        {results && <ResultsTable data={results} />}
+      </div>
     </div>
   );
 }
+
