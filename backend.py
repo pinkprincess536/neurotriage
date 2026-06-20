@@ -162,6 +162,14 @@ async def lifespan(app: FastAPI):
     global model, train_mean, train_std, device, supabase
     print("Connecting to Supabase...")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    # Try to ensure the eeg-recordings bucket exists
+    try:
+        supabase.storage.create_bucket("eeg-recordings", options={"public": False})
+        print("Bucket 'eeg-recordings' created or verified.")
+    except Exception as e:
+        print(f"Note: Could not automatically create bucket (already exists or key lacks permissions): {e}")
+
     print("Loading model...")
     model, train_mean, train_std, device = load_model("model/")
     print("Model loaded. Ready for requests.")
@@ -230,10 +238,23 @@ async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float
 
         storage_path = f"{patient_id}/{uuid_lib.uuid4().hex}_{file.filename}"
         with open(tmp_path, "rb") as f:
-            supabase.storage.from_("eeg-recordings").upload(
-                path=storage_path, file=f,
-                file_options={"content-type": "application/octet-stream"}
-            )
+            try:
+                supabase.storage.from_("eeg-recordings").upload(
+                    path=storage_path, file=f,
+                    file_options={"content-type": "application/octet-stream"}
+                )
+            except Exception as e:
+                err_str = str(e)
+                if "Bucket not found" in err_str:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Storage bucket 'eeg-recordings' was not found in Supabase. "
+                               "Please create a private bucket named 'eeg-recordings' in your Supabase Dashboard."
+                    )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload file to Supabase storage: {err_str}"
+                )
 
         rec = supabase.table("recordings").insert({
             "patient_id": patient_id,
