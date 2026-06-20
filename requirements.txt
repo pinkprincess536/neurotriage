@@ -7,3 +7,4 @@ mne
 boto3
 supabase
 python-dotenv
+mlflow

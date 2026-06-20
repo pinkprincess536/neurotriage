@@ -308,3 +308,81 @@ async def save_feedback(request: Request):
 
     return {"status": "saved"}
 
+
+@app.post("/admin/promote")
+async def promote_model():
+    global model, train_mean, train_std, device
+    
+    candidate_dir = "model/candidate"
+    prod_dir = "model"
+    
+    status_path = os.path.join(candidate_dir, "retraining_status.json")
+    if not os.path.exists(status_path):
+        raise HTTPException(status_code=400, detail="No candidate model status found. Please run evaluate_promote.py first.")
+        
+    with open(status_path, "r") as f:
+        status_info = json.load(f)
+        
+    if status_info.get("status") != "ready":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Candidate model is not ready for promotion. Status: {status_info.get('status')}. Reason: {status_info.get('reason')}"
+        )
+        
+    # Copy files from candidate to prod
+    try:
+        import shutil
+        for filename in ["eegcnn1d_weights.pth", "model_config.json", "test_metrics.json"]:
+            src = os.path.join(candidate_dir, filename)
+            dst = os.path.join(prod_dir, filename)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+                
+        # Reload model in memory
+        print("Reloading model in FastAPI memory...")
+        model, train_mean, train_std, device = load_model(prod_dir)
+        print("Model reloaded successfully.")
+        
+        # Transition MLflow Staging to Production if MLflow is running and we can query it
+        try:
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            mlflow.set_tracking_uri("sqlite:///mlflow.db")
+            client = MlflowClient()
+            
+            # Transition in MLflow Model Registry
+            cand_config_path = os.path.join(prod_dir, "model_config.json")
+            with open(cand_config_path) as f:
+                cand_config = json.load(f)
+            new_version = cand_config.get("model_version", "v2")
+            
+            try:
+                mv_list = client.search_model_versions("name='EEGCNN1D'")
+                if mv_list:
+                    latest_mv = sorted(mv_list, key=lambda x: int(x.version), reverse=True)[0]
+                    client.transition_model_version_stage(
+                        name="EEGCNN1D",
+                        version=latest_mv.version,
+                        stage="Production",
+                        archive_existing_versions=True
+                    )
+                    print(f"MLflow model version {latest_mv.version} transitioned to Production.")
+            except Exception as registry_err:
+                print(f"Note: MLflow registry transition skipped: {registry_err}")
+        except Exception as mlflow_err:
+            print(f"Note: MLflow tracking connection skipped: {mlflow_err}")
+            
+        # Get updated config
+        config_path = os.path.join(prod_dir, "model_config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+            
+        return {
+            "status": "promoted",
+            "message": "Candidate model successfully promoted to production and reloaded in memory.",
+            "version": config.get("model_version", "v2"),
+            "metrics": status_info.get("candidate_metrics")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to promote model: {str(e)}")
+
