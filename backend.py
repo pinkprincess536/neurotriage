@@ -1,44 +1,169 @@
-import json
-import os
-import secrets
-import shutil
-import subprocess
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-
-from fastapi import FastAPI, UploadFile, Request, Response, HTTPException, Depends
+from fastapi import FastAPI,UploadFile,Query,Request,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from supabase import create_client
+import tempfile
+import os
+import shutil
+import json
+import uuid as uuid_lib
+from datetime import datetime, timezone
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-from db import init_db, create_patient, list_patients, get_patient, create_recording, get_recording, add_feedback, count_feedback
-from eeg_core import load_model, predict_edf, get_model_version
+load_dotenv()
 
-MODEL_DIR = "model"
-CANDIDATE_DIR = "model/candidate"
-EDF_DIR = "data/edfs"
-SESSION_COOKIE = "eeg_session"
-MIN_FEEDBACK_LABELS = int(os.environ.get("MIN_FEEDBACK_LABELS", "20"))
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+DOCTOR_PASSWORD = os.getenv("DOCTOR_PASSWORD", "eeg-demo")
 
-sessions: set[str] = set()
-admin_sessions: set[str] = set()
+
+EEG_CHANNELS = [
+    "FP1-F7", "F7-T7", "T7-P7", "P7-O1",
+    "FP1-F3", "F3-C3", "C3-P3", "P3-O1",
+    "FP2-F4", "F4-C4", "C4-P4", "P4-O2",
+    "FP2-F8", "F8-T8", "T8-P8", "P8-O2",
+    "FZ-CZ", "CZ-PZ",
+    "P7-T7", "T7-FT9", "FT9-FT10", "FT10-T8",
+]
+
+WINDOW_SIZE_SEC = 7.0
+OVERLAP = 0.3
+LOWCUT = 0.5
+HIGHCUT = 40.0
+NOTCH_FREQ = 60.0
+
+
+class EEGCNN1D(nn.Module):
+    def __init__(self, n_channels=22, n_classes=2):
+        super().__init__()
+
+        self.conv1 = nn.Conv1d(n_channels, 32, kernel_size=7, padding=3)
+        self.bn1 = nn.BatchNorm1d(32)
+        self.pool1 = nn.MaxPool1d(4)
+
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.pool2 = nn.MaxPool1d(4)
+
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.adapt = nn.AdaptiveAvgPool1d(16)
+
+        self.drop1 = nn.Dropout(0.4)
+        self.fc1 = nn.Linear(128 * 16, 64)
+        self.drop2 = nn.Dropout(0.3)
+        self.fc2 = nn.Linear(64, n_classes)
+
+    def forward(self, x):
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.adapt(x)
+        x = torch.flatten(x, 1)
+        x = self.drop1(x)
+        x = F.relu(self.fc1(x))
+        x = self.drop2(x)
+        x = self.fc2(x)
+        return x
+
+def load_model(model_dir):
+    import json
+
+    config_path=os.path.join(model_dir,"model_config.json")
+    weights_path=os.path.join(model_dir,"eegcnn1d_weights.pth")
+    mean_path=os.path.join(model_dir,"train_mean.npy")
+    std_path=os.path.join(model_dir,"train_std.npy")
+    
+    with open(config_path, "r") as f:
+        config = json.load(f)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = EEGCNN1D(n_channels=config.get("n_channels", 22))
+    model.load_state_dict(torch.load(weights_path, map_location=device))
+    model.to(device)
+    model.eval()
+
+    train_mean = np.load(mean_path)
+    train_std = np.load(std_path)
+
+    return model, train_mean, train_std, device
+
+def process_edf(edf_path):
+    import mne
+
+    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
+    sfreq = raw.info["sfreq"]
+
+    available = raw.ch_names
+    channels_to_use = [ch for ch in EEG_CHANNELS if ch in available]
+    if len(channels_to_use) < 18:
+        raise ValueError(f"Only {len(channels_to_use)} matching channels found")
+
+    raw.pick_channels(channels_to_use)
+    raw.filter(LOWCUT, HIGHCUT, fir_design="firwin", verbose=False)
+    raw.notch_filter(freqs=NOTCH_FREQ, verbose=False)
+    signal = raw.get_data()
+    n_chan = signal.shape[0]
+
+    ws = int(WINDOW_SIZE_SEC * sfreq)
+    stride = int(ws * (1 - OVERLAP))
+    total = signal.shape[1]
+
+    windows = []
+    timestamps = []
+    for start in range(0, total - ws + 1, stride):
+        windows.append(signal[:, start:start + ws])
+        timestamps.append(start / sfreq)
+
+    windows = np.array(windows, dtype=np.float32)
+    timestamps = np.array(timestamps)
+
+    if n_chan < len(EEG_CHANNELS):
+        pad = np.zeros(
+            (windows.shape[0], len(EEG_CHANNELS) - n_chan, windows.shape[2]),
+            dtype=np.float32,
+        )
+        windows = np.concatenate([windows, pad], axis=1)
+
+    duration_sec = total / sfreq
+    return windows, timestamps, duration_sec
+
+def score_windows(model, windows, train_mean, train_std, device):
+    mean_2d = train_mean.squeeze(0)
+    std_2d = train_std.squeeze(0)
+
+    if mean_2d.ndim == 2:
+        mean_2d = mean_2d[:, :1]
+        std_2d = std_2d[:, :1]
+
+    X = (windows - mean_2d) / (std_2d + 1e-8)
+
+    X_tensor = torch.tensor(X, dtype=torch.float32).to(device)
+
+    with torch.no_grad():
+        outputs = model(X_tensor)
+        probs = torch.softmax(outputs, dim=1)[:, 1]
+
+    return probs.cpu().numpy()
+
 
 model = None
 train_mean = None
 train_std = None
 device = None
-model_config = None
-
-
-def reload_model(model_dir=MODEL_DIR):
-    global model, train_mean, train_std, device, model_config
-    model, train_mean, train_std, device, model_config = load_model(model_dir)
-    return model
-
+supabase = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    global model, train_mean, train_std, device, supabase
+    print("Connecting to Supabase...")
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("Loading model...")
-    reload_model()
+    model, train_mean, train_std, device = load_model("model/")
     print("Model loaded. Ready for requests.")
     yield
 
@@ -48,312 +173,116 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-def get_session_token(request: Request) -> str | None:
-    return request.cookies.get(SESSION_COOKIE)
-
-
-def require_auth(request: Request):
-    token = get_session_token(request)
-    if not token or token not in sessions:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-
-def require_admin(request: Request):
-    token = get_session_token(request)
-    if not token or token not in admin_sessions:
-        raise HTTPException(status_code=403, detail="Admin access required")
-
-
 @app.get("/health")
 def health():
-    metrics = {}
-    metrics_path = os.path.join(MODEL_DIR, "test_metrics.json")
-    if os.path.isfile(metrics_path):
-        with open(metrics_path) as f:
-            metrics = json.load(f)
-    return {
-        "status": "ok",
-        "model_loaded": model is not None,
-        "model_version": get_model_version(MODEL_DIR),
-        "feedback_count": count_feedback(),
-        "min_feedback_labels": MIN_FEEDBACK_LABELS,
-        "metrics": metrics,
-    }
+    return {"status": "ok", "model_loaded": model is not None}
 
 
 @app.post("/login")
-async def login(request: Request, response: Response):
-    data = await request.json()
-    password = data.get("password", "")
-    doctor_pw = os.environ.get("DOCTOR_PASSWORD", "doctor")
-    admin_pw = os.environ.get("ADMIN_PASSWORD", "admin")
-
-    if password == doctor_pw:
-        token = secrets.token_hex(16)
-        sessions.add(token)
-        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
-        return {"status": "ok", "role": "doctor"}
-
-    if password == admin_pw:
-        token = secrets.token_hex(16)
-        admin_sessions.add(token)
-        sessions.add(token)
-        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax")
-        return {"status": "ok", "role": "admin"}
-
-    raise HTTPException(status_code=401, detail="Invalid password")
-
-
-@app.post("/logout")
-async def logout(request: Request, response: Response):
-    token = get_session_token(request)
-    if token:
-        sessions.discard(token)
-        admin_sessions.discard(token)
-    response.delete_cookie(SESSION_COOKIE)
-    return {"status": "ok"}
-
-
-@app.get("/auth/check")
-def auth_check(request: Request):
-    token = get_session_token(request)
-    if not token or token not in sessions:
-        return {"authenticated": False}
-    role = "admin" if token in admin_sessions else "doctor"
-    return {"authenticated": True, "role": role}
+def login(data: dict):
+    if data.get("password") == DOCTOR_PASSWORD:
+        return {"token": "doctor-session", "role": "doctor"}
+    raise HTTPException(401, "Wrong password")
 
 
 @app.get("/patients")
-def get_patients(_: None = Depends(require_auth)):
-    return {"patients": list_patients()}
+def list_patients():
+    res = supabase.table("patients").select("*").order("created_at", desc=True).execute()
+    return {"patients": res.data}
 
 
 @app.post("/patients")
-async def post_patient(request: Request, _: None = Depends(require_auth)):
+async def create_patient(request: Request):
     data = await request.json()
-    name = (data.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Patient name required")
-    patient = create_patient(name)
-    return patient
-
+    res = supabase.table("patients").insert({"name": data["name"]}).execute()
+    return {"patient": res.data[0]}
 
 @app.post("/patients/{patient_id}/upload")
-async def upload_recording(
-    patient_id: int,
-    file: UploadFile,
-    threshold: float = 0.70,
-    _: None = Depends(require_auth),
-):
-    patient = get_patient(patient_id)
-    if not patient:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    os.makedirs(EDF_DIR, exist_ok=True)
-    safe_name = os.path.basename(file.filename or "recording.edf")
-    if not safe_name.lower().endswith(".edf"):
-        safe_name += ".edf"
-
-  temp_path = os.path.join(EDF_DIR, f"tmp_{secrets.token_hex(8)}_{safe_name}")
-    content = await file.read()
-    with open(temp_path, "wb") as f:
-        f.write(content)
-
-    try:
-        version = get_model_version(MODEL_DIR)
-        predict_result = predict_edf(temp_path, model, train_mean, train_std, device, threshold)
-        final_path = os.path.join(EDF_DIR, f"{patient_id}_{safe_name}")
-        if os.path.exists(final_path):
-            os.remove(final_path)
-        os.rename(temp_path, final_path)
-        temp_path = None
-
-        recording = create_recording(
-            patient_id=patient_id,
-            filename=safe_name,
-            edf_path=final_path,
-            duration_sec=predict_result["recording_duration_sec"],
-            model_version=version,
-        )
-
-        return {
-            "recording_id": recording["id"],
-            "patient_id": patient_id,
-            "filename": safe_name,
-            **predict_result,
-        }
-    except Exception as e:
-        if temp_path and os.path.isfile(temp_path):
-            os.unlink(temp_path)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/predict")
-async def predict(file: UploadFile, threshold: float = 0.70):
-    """Legacy endpoint: predict without persisting EDF."""
-    import tempfile
-
+async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float = 0.70):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".edf") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        return predict_edf(tmp_path, model, train_mean, train_std, device, threshold)
+        windows, timestamps, duration_sec = process_edf(tmp_path)
+        scores = score_windows(model, windows, train_mean, train_std, device)
+
+        above = scores >= threshold
+        flagged_indices = np.where(above)[0]
+        order = flagged_indices[np.argsort(-scores[flagged_indices])]
+
+        results = []
+        for rank, idx in enumerate(order, 1):
+            mins = int(timestamps[idx] // 60)
+            secs = int(timestamps[idx] % 60)
+            results.append({
+                "rank": rank,
+                "timestamp_str": f"{mins:02d}:{secs:02d}",
+                "timestamp_sec": round(float(timestamps[idx]), 1),
+                "score": round(float(scores[idx]), 4),
+                "tier": "urgent" if scores[idx] >= 0.95 else "review",
+            })
+
+        storage_path = f"{patient_id}/{uuid_lib.uuid4().hex}_{file.filename}"
+        with open(tmp_path, "rb") as f:
+            supabase.storage.from_("eeg-recordings").upload(
+                path=storage_path, file=f,
+                file_options={"content-type": "application/octet-stream"}
+            )
+
+        rec = supabase.table("recordings").insert({
+            "patient_id": patient_id,
+            "filename": file.filename,
+            "storage_path": storage_path,
+            "duration_sec": round(duration_sec, 1),
+            "total_windows": len(windows),
+            "flagged_windows": len(flagged_indices),
+            "threshold_used": threshold,
+            "model_version": "v1",
+        }).execute()
+
+        recording_id = rec.data[0]["id"]
+
+        window_sec = 7.0
+        stride_sec = window_sec * (1 - 0.3)
+        windows_per_hour = 3600 / stride_sec
+        est_per_hour = len(flagged_indices) / len(scores) * windows_per_hour
+
+        return {
+            "recording_id": recording_id,
+            "patient_id": patient_id,
+            "recording_duration_sec": round(duration_sec, 1),
+            "total_windows": len(windows),
+            "flagged_windows": len(flagged_indices),
+            "estimated_per_hour": round(est_per_hour, 0),
+            "threshold": threshold,
+            "results": results,
+        }
+
     finally:
         os.unlink(tmp_path)
 
 
 @app.post("/feedback")
-async def save_feedback(request: Request, _: None = Depends(require_auth)):
+async def save_feedback(request: Request):
     data = await request.json()
-    recording_id = data.get("recording_id")
-    timestamp_sec = data.get("timestamp_sec")
-    score = data.get("score")
-    label = data.get("label")
 
-    if not recording_id or timestamp_sec is None or not label:
-        raise HTTPException(status_code=400, detail="recording_id, timestamp_sec, and label required")
+    supabase.table("feedback").insert({
+        "recording_id": data["recording_id"],
+        "timestamp_sec": data["timestamp_sec"],
+        "model_score": data["score"],
+        "doctor_label": data["label"],
+        "model_version": "v1",
+    }).execute()
 
-    recording = get_recording(int(recording_id))
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
-
-    version = get_model_version(MODEL_DIR)
-    row = add_feedback(
-        recording_id=int(recording_id),
-        timestamp_sec=float(timestamp_sec),
-        model_score=float(score) if score is not None else None,
-        doctor_label=label,
-        model_version=version,
-    )
-
-    entry = {
-        "timestamp_sec": timestamp_sec,
-        "model_score": score,
-        "doctor_label": label,
-        "recording_id": recording_id,
-        "model_version": version,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
-    }
     with open("feedback.jsonl", "a") as f:
-        f.write(json.dumps(entry) + "\n")
+        json.dump({**data, "model_version": "v1",
+                   "submitted_at": datetime.now(timezone.utc).isoformat()}, f)
+        f.write("\n")
 
-    return {"status": "saved", "feedback_id": row["id"]}
+    return {"status": "saved"}
 
-
-@app.get("/admin/status")
-def admin_status(_: None = Depends(require_admin)):
-    metrics = {}
-    metrics_path = os.path.join(MODEL_DIR, "test_metrics.json")
-    if os.path.isfile(metrics_path):
-        with open(metrics_path) as f:
-            metrics = json.load(f)
-
-    candidate_metrics = {}
-    candidate_path = os.path.join(CANDIDATE_DIR, "test_metrics.json")
-    if os.path.isfile(candidate_path):
-        with open(candidate_path) as f:
-            candidate_metrics = json.load(f)
-
-    retraining_status = {}
-    status_path = "ml/retraining_status.json"
-    if os.path.isfile(status_path):
-        with open(status_path) as f:
-            retraining_status = json.load(f)
-
-    return {
-        "production": {
-            "model_version": get_model_version(MODEL_DIR),
-            "metrics": metrics,
-        },
-        "candidate": candidate_metrics,
-        "feedback_count": count_feedback(),
-        "min_feedback_labels": MIN_FEEDBACK_LABELS,
-        "retraining_status": retraining_status,
-        "mlflow_ui": "http://127.0.0.1:5000",
-    }
-
-
-@app.post("/admin/retrain")
-def admin_retrain(_: None = Depends(require_admin)):
-    if count_feedback() < MIN_FEEDBACK_LABELS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Need at least {MIN_FEEDBACK_LABELS} feedback labels (have {count_feedback()})",
-        )
-
-    try:
-        subprocess.run(
-            ["python", "ml/build_feedback_dataset.py"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(
-            ["python", "ml/train_retrain.py"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        result = subprocess.run(
-            ["python", "ml/evaluate_promote.py"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return {"status": "completed", "output": result.stdout}
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=e.stderr or str(e))
-
-
-@app.post("/admin/promote")
-def admin_promote(_: None = Depends(require_admin)):
-    candidate_weights = os.path.join(CANDIDATE_DIR, "eegcnn1d_weights.pth")
-    if not os.path.isfile(candidate_weights):
-        raise HTTPException(status_code=400, detail="No candidate model found")
-
-    for name in ["eegcnn1d_weights.pth", "model_config.json", "test_metrics.json", "train_mean.npy", "train_std.npy"]:
-        src = os.path.join(CANDIDATE_DIR, name)
-        if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(MODEL_DIR, name))
-
-    config_path = os.path.join(MODEL_DIR, "model_config.json")
-    if os.path.isfile(config_path):
-        with open(config_path) as f:
-            config = json.load(f)
-        config["model_version"] = config.get("model_version", "v1") + "_promoted"
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2)
-
-    reload_model()
-
-    deploy_entry = {
-        "promoted_at": datetime.now(timezone.utc).isoformat(),
-        "model_version": get_model_version(MODEL_DIR),
-        "metrics": json.load(open(os.path.join(MODEL_DIR, "test_metrics.json"))),
-    }
-    os.makedirs("ml", exist_ok=True)
-    with open("ml/deployments.jsonl", "a") as f:
-        f.write(json.dumps(deploy_entry) + "\n")
-
-    return {"status": "promoted", "model_version": get_model_version(MODEL_DIR)}
-
-
-@app.post("/admin/reject")
-def admin_reject(_: None = Depends(require_admin)):
-    if os.path.isdir(CANDIDATE_DIR):
-        shutil.rmtree(CANDIDATE_DIR)
-    status_path = "ml/retraining_status.json"
-    if os.path.isfile(status_path):
-        with open(status_path) as f:
-            status = json.load(f)
-        status["status"] = "rejected"
-        with open(status_path, "w") as f:
-            json.dump(status, f, indent=2)
-    return {"status": "rejected"}
