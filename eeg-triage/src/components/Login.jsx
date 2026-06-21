@@ -1,6 +1,5 @@
 import { useState } from "react";
-
-const BACKEND_URL = "http://localhost:8000";
+import { BACKEND_URL } from "../config";
 
 export default function Login({ onLogin }) {
   const [password, setPassword] = useState("");

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BACKEND_URL } from "../config";
 
 export default function ResultsTable({ data }) {
   const [feedback, setFeedback] = useState({});
@@ -9,7 +10,7 @@ export default function ResultsTable({ data }) {
   setFeedback(prev => ({ ...prev, [r.rank]: label }));
 
   try {
-    await fetch("http://localhost:8000/feedback", {
+    await fetch(`${BACKEND_URL}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
