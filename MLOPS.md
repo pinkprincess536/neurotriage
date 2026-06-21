@@ -295,3 +295,246 @@ By installing with `--index-url https://download.pytorch.org/whl/cpu`, we get CP
 | `.dockerignore` | Excludes unnecessary files from backend image |
 | `eeg-triage/.dockerignore` | Excludes node_modules/dist from frontend build context |
 | `.env.example` | Template showing required environment variables |
+
+---
+
+## Step 3: Automated Testing with pytest
+
+### Why Automated Tests?
+
+You change one line in `retrain.py`. It works. You push to main. But that change accidentally broke the `/login` endpoint — and you don't notice until a user complains.
+
+Automated tests prevent this. Before every deploy, you run a suite of tests that verify: "Can users still log in? Does the model load? Do admin-only endpoints reject doctors?"
+
+**Without tests:**
+```
+Change code → Push → Hope nothing broke → Find out from users
+```
+
+**With tests:**
+```
+Change code → Run tests → Tests catch the bug → Fix before pushing
+```
+
+### pytest — The Standard Python Test Framework
+
+pytest discovers and runs test functions automatically. The rules are simple:
+- Files named `test_*.py` are test files
+- Functions named `test_*` are test functions
+- Use `assert` to check expected values
+
+```python
+def test_health(client):
+    res = client.get("/health")
+    assert res.status_code == 200         # Did it return OK?
+    assert res.json()["status"] == "ok"   # Is the response correct?
+```
+
+If any `assert` fails, the test fails and pytest tells you exactly which line and what the values were.
+
+### Fixtures — Reusable Test Setup
+
+A **fixture** is a function that provides something tests need (a database connection, a test client, a logged-in user). pytest injects fixtures automatically by matching parameter names:
+
+```python
+@pytest.fixture()
+def admin_token(client):
+    res = client.post("/login", json={"password": "test-admin"})
+    return res.json()["token"]
+
+def test_models_admin(client, admin_token):
+    # pytest sees "admin_token" parameter → calls the fixture → passes the result
+    res = client.get("/models", headers={"Authorization": f"Bearer {admin_token}"})
+    assert res.status_code == 200
+```
+
+**`scope="session"`** means the fixture runs once for the entire test session (not once per test). We use this for the test client since loading the ML model is slow — we only want to do it once.
+
+### Mocking — Faking External Services
+
+Our backend needs Supabase (cloud database). But in tests, we don't want to:
+- Require a real Supabase account to run tests
+- Write test data to the production database
+- Have tests fail because the internet is down
+
+**Mocking** = replacing a real object with a fake one that behaves how we tell it to.
+
+```python
+mock_supabase = MagicMock()  # Fake Supabase client
+mock_supabase.table("feedback").insert(...).execute()  # Won't actually call Supabase
+
+with patch("backend.create_client", return_value=mock_supabase):
+    # Now when backend.py calls create_client(), it gets our fake instead
+```
+
+The backend thinks it's talking to Supabase, but it's actually talking to our mock. The mock accepts any method call and returns fake data — so the code runs without errors, and we can test the logic without the external dependency.
+
+### What We Test
+
+| Test | What it verifies |
+|---|---|
+| `test_health` | Server is running, model is loaded |
+| `test_login_doctor` | Doctor password → returns doctor role + token |
+| `test_login_admin` | Admin password → returns admin role + token |
+| `test_login_wrong_password` | Wrong password → 401 Unauthorized |
+| `test_models_admin` | Admin can list model versions |
+| `test_models_doctor_forbidden` | Doctor cannot list models → 403 |
+| `test_models_no_auth` | No token → 403 |
+| `test_activate_admin` | Admin can activate a model version |
+| `test_activate_invalid_version` | Invalid version → 400 |
+| `test_activate_doctor_forbidden` | Doctor cannot activate → 403 |
+| `test_feedback` | Feedback saves successfully (mocked Supabase) |
+| `test_retrain_doctor_forbidden` | Doctor cannot retrain → 403 |
+| `test_retrain_no_auth` | No token → 403 |
+
+### How Tests Connect to CI/CD
+
+In the next step (GitHub Actions), we'll run `pytest` automatically on every push:
+
+```
+Developer pushes code → GitHub Actions runs pytest → 
+  If tests pass → proceed to build + deploy
+  If tests fail → STOP, notify developer
+```
+
+Tests are the **gate** that prevents broken code from reaching production.
+
+### What We Implemented (Code ↔ Concepts)
+
+| Concept | Implementation |
+|---|---|
+| Test framework | pytest with `pyproject.toml` config |
+| Test client | FastAPI's `TestClient` — sends real HTTP requests to the app in-process |
+| Fixtures | `client` (session-scoped), `admin_token`, `doctor_token` |
+| Mocking | `MagicMock` replaces Supabase client, `patch` injects it |
+| Auth testing | Tests verify admin-only endpoints reject doctor tokens |
+| Python path | `pythonpath = ["."]` in pyproject.toml so tests can import `backend` |
+
+### Files Created
+
+| File | What it does |
+|---|---|
+| `tests/conftest.py` | Fixtures: mock Supabase, create TestClient, generate auth tokens |
+| `tests/test_api.py` | 13 endpoint tests covering auth, models, feedback, retrain |
+| `requirements-dev.txt` | Test dependencies (pytest, httpx) — not in production image |
+| `pyproject.toml` | pytest config: test paths, Python path |
+
+---
+
+## Step 4: CI/CD with GitHub Actions
+
+### What is CI/CD?
+
+**CI (Continuous Integration)** = automatically testing code every time someone pushes. The word "integration" means you're constantly checking that new code "integrates" with existing code without breaking it.
+
+**CD (Continuous Deployment)** = automatically deploying code after tests pass. No human clicks "deploy" — the pipeline does it.
+
+Together, CI/CD creates an automated quality gate:
+
+```
+Push code → Tests run automatically → Pass? → Build + Deploy
+                                    → Fail? → STOP, notify developer
+```
+
+Without CI/CD: "I'll run the tests later... oops I forgot, now production is broken."
+With CI/CD: Tests run whether you remember or not. Broken code can't slip through.
+
+### GitHub Actions — How It Works
+
+GitHub Actions is GitHub's built-in CI/CD platform. You define **workflows** in YAML files inside `.github/workflows/`.
+
+**Key concepts:**
+
+**Workflow** — A YAML file that defines what to automate. Triggered by events (push, pull request, schedule).
+
+**Job** — A set of steps that run on a fresh virtual machine. Multiple jobs can run in parallel or sequentially.
+
+**Step** — A single command or action within a job. Steps run sequentially within a job.
+
+**Runner** — The virtual machine that executes your job. `ubuntu-latest` gives you a clean Linux machine with common tools pre-installed.
+
+```yaml
+name: CI                           # Workflow name (shows on GitHub)
+
+on:
+  push:
+    branches: [main]               # Trigger: every push to main
+  pull_request:
+    branches: [main]               # Trigger: every PR targeting main
+
+jobs:
+  test:                            # Job name
+    runs-on: ubuntu-latest         # Fresh Linux VM
+    steps:
+      - uses: actions/checkout@v4  # Step 1: download your code
+      - uses: actions/setup-python@v5  # Step 2: install Python
+      - run: pip install ...       # Step 3: install dependencies
+      - run: pytest tests/ -v      # Step 4: run tests
+```
+
+### Why Tests Run on a Clean Machine
+
+Your laptop has Python installed, libraries cached, environment variables set, model files in the right place. It's configured specifically for this project.
+
+The GitHub Actions runner is a **blank slate** — nothing is pre-configured. If your tests pass there, it proves your code works from scratch, not just on your machine.
+
+This catches problems like:
+- Missing dependencies not listed in `requirements.txt`
+- Hardcoded file paths that only exist on your machine
+- Environment variables you set manually but forgot to document
+
+### Our Pipeline — Two Jobs
+
+```
+┌─────────────────────────────┐
+│  Job 1: test                │
+│  ─────────────              │
+│  1. Checkout code           │
+│  2. Setup Python 3.10       │
+│  3. Install CPU PyTorch     │
+│  4. Install all deps        │
+│  5. Run pytest (13 tests)   │
+│                             │
+│  ~30 seconds                │
+└──────────┬──────────────────┘
+           │ passes?
+           ↓
+┌─────────────────────────────┐
+│  Job 2: docker-build        │
+│  ─────────────              │
+│  1. Checkout code           │
+│  2. Setup Docker Buildx     │
+│  3. Build backend image     │
+│  4. Build frontend image    │
+│                             │
+│  ~5 minutes                 │
+└─────────────────────────────┘
+```
+
+Job 2 has `needs: test` — it only runs if tests pass. If tests fail, Docker build is skipped (saves ~5 minutes of compute).
+
+### The Green ✓ / Red ✗ Feedback Loop
+
+After each push, GitHub shows a status icon next to the commit:
+- **Green ✓** — all jobs passed, code is healthy
+- **Red ✗** — something failed, click to see which test/step broke
+- **Yellow ●** — pipeline is still running
+
+This is visible on the GitHub repo page, in pull requests, and in commit history. Your team (or professor) can see at a glance whether the codebase is healthy.
+
+### What We Implemented (Code ↔ Concepts)
+
+| Concept | Implementation |
+|---|---|
+| Workflow trigger | `on: push` to main + pull requests |
+| Test job | Python 3.10, CPU-only PyTorch, pytest |
+| Docker build job | Buildx, builds both backend + frontend images |
+| Job dependency | `needs: test` — Docker only builds if tests pass |
+| Pip caching | `cache: "pip"` in setup-python — faster subsequent runs |
+| Cost | Free for public repos, 2000 min/month for private |
+
+### Files Created
+
+| File | What it does |
+|---|---|
+| `.github/workflows/ci.yml` | CI/CD pipeline — test then build Docker images on every push |
