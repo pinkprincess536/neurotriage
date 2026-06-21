@@ -155,3 +155,143 @@ As feedback data grows (50+ samples), we can hold out 20% for honest evaluation.
 | `App.jsx` | Split into doctor view (upload flow) and admin view (model dashboard) |
 | `App.css` | Metrics table styling, scrollable for wide tables |
 | `backend.py` | No changes — `GET /models` already returns version data with metrics |
+
+---
+
+## Step 2: Containerization with Docker
+
+### What is Containerization?
+
+Containerization = packaging your application with **everything it needs to run** (OS, Python, libraries, model files) into a single portable unit called a **container**.
+
+Without containers:
+```
+"It works on my machine" → crashes on the server
+Different Python version, missing library, wrong OS, path differences...
+```
+
+With containers:
+```
+"It works in the container" → works everywhere
+Same environment on your laptop, your teammate's laptop, the production server
+```
+
+### Docker Concepts
+
+**Dockerfile** — A recipe (text file) that describes how to build your environment step by step:
+
+```
+FROM python:3.10-slim     ← Start with Python 3.10 pre-installed
+COPY requirements.txt .   ← Copy your dependency list
+RUN pip install ...        ← Install dependencies
+COPY backend.py .          ← Copy your code
+CMD uvicorn backend:app    ← "When someone runs this container, start the server"
+```
+
+Each line creates a **layer**. Docker caches layers — if you change your code but not your dependencies, Docker only re-runs the code copy step, not the pip install step. This makes rebuilds fast.
+
+**Image** — The built result of a Dockerfile. A frozen snapshot of the entire environment. Read-only. Think of it as a **template**.
+
+**Container** — A running instance of an image. You can run 10 containers from 1 image. Think of it as a **running copy** of the template.
+
+```
+Dockerfile (recipe) ──build──→ Image (template) ──run──→ Container (running app)
+```
+
+**Registry** — A place to store and share images. Docker Hub is the most common (like GitHub but for Docker images). You `push` images to a registry and `pull` them to run elsewhere.
+
+### Multi-Stage Builds
+
+Our frontend uses a **multi-stage build** — two separate stages in one Dockerfile:
+
+**Stage 1: Build**
+- Uses Node.js (300MB) to compile React → static HTML/CSS/JS files (~500KB)
+- This stage exists only to produce the build output
+
+**Stage 2: Serve**
+- Uses Nginx (25MB) to serve the static files
+- Copies ONLY the build output from Stage 1
+- Node.js is thrown away — it's not in the final image
+
+```
+Stage 1 (builder):  Node.js + source code → npm run build → dist/ folder
+                                                    ↓ (copy only dist/)
+Stage 2 (final):    Nginx + dist/ folder → serve static files
+```
+
+Result: **25MB final image** instead of 300MB. The build tools (Node, npm, source code) are not in the production image.
+
+Analogy: You need an oven to bake a cake, but you don't ship the oven to the customer — just the cake.
+
+### Docker Compose
+
+When your app has multiple services (backend + frontend), Docker Compose lets you define and run them together:
+
+```yaml
+services:
+  backend:
+    build: .            # Build from Dockerfile in root
+    ports: ["8000:8000"] # Map container port 8000 to host port 8000
+    env_file: .env       # Load environment variables
+
+  frontend:
+    build: ./eeg-triage  # Build from Dockerfile in eeg-triage/
+    ports: ["80:80"]
+    depends_on: [backend] # Start backend before frontend
+```
+
+One command to rule them all:
+- `docker compose up` — build and start everything
+- `docker compose down` — stop everything
+- `docker compose up --build` — rebuild and start
+
+### .dockerignore — Keeping Images Lean and Secure
+
+Just like `.gitignore` tells git which files to skip, `.dockerignore` tells Docker which files to NOT copy into the image:
+
+```
+.git/           ← Could be 100MB+, not needed at runtime
+.env            ← NEVER bake secrets into an image
+node_modules/   ← Will be installed fresh inside the container
+*.ipynb         ← Notebooks aren't needed for the server
+journaling/     ← Documentation doesn't need to be in the image
+```
+
+**Security note:** If `.env` is copied into the image, anyone who gets the image gets your passwords and API keys. By excluding it and using `env_file:` in docker-compose, secrets are passed at **runtime**, not baked into the image.
+
+### CPU-Only PyTorch — Why We Skip GPU Support
+
+PyTorch ships with CUDA (GPU) support by default. This adds **~1.8GB** to the download.
+
+Our model is tiny (300K parameters, 0.66MB weights file). It runs inference in milliseconds on CPU. We don't need GPU support in the Docker image.
+
+By installing with `--index-url https://download.pytorch.org/whl/cpu`, we get CPU-only PyTorch at **~200MB** — a 10x size reduction with identical performance for our use case.
+
+| Version | Size | When to use |
+|---|---|---|
+| PyTorch + CUDA | ~2GB | Training large models on GPU servers |
+| PyTorch CPU-only | ~200MB | Inference with small models, Docker images, CI/CD |
+
+### What We Implemented (Code ↔ Concepts)
+
+| Concept | Implementation |
+|---|---|
+| Backend container | `Dockerfile` — Python 3.10 slim, CPU-only PyTorch, copies model + source |
+| Frontend container | `eeg-triage/Dockerfile` — Multi-stage: Node build → Nginx serve |
+| SPA routing | `eeg-triage/nginx.conf` — Falls back to index.html for React Router |
+| Service orchestration | `docker-compose.yml` — Backend + frontend, env_file, health check |
+| Image optimization | `.dockerignore` — Excludes .git, .env, notebooks, node_modules |
+| Secret management | `.env.example` template + `env_file:` at runtime (not baked in) |
+| Build arg | `VITE_BACKEND_URL` passed at build time for frontend API URL |
+
+### Files Created
+
+| File | What it does |
+|---|---|
+| `Dockerfile` | Backend container recipe — Python + FastAPI + model |
+| `eeg-triage/Dockerfile` | Frontend container recipe — Node build → Nginx serve |
+| `eeg-triage/nginx.conf` | Nginx config for SPA routing + static file caching |
+| `docker-compose.yml` | Runs backend + frontend together |
+| `.dockerignore` | Excludes unnecessary files from backend image |
+| `eeg-triage/.dockerignore` | Excludes node_modules/dist from frontend build context |
+| `.env.example` | Template showing required environment variables |

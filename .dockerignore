@@ -1,0 +1,14 @@
+__pycache__/
+.git/
+.env
+*.edf
+test_data/
+eeg-triage/
+*.ipynb
+journaling/
+feedback.jsonl
+debug-*.log
+docker-compose.yml
+MLOPS.md
+.dockerignore
+.gitignore
