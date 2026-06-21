@@ -26,22 +26,38 @@ def _write_config(model_dir, config):
 
 def migrate_config(model_dir):
     config = _read_config(model_dir)
-    if "versions" in config:
-        return
+    changed = False
 
-    old_weights = os.path.join(model_dir, "eegcnn1d_weights.pth")
-    v1_weights = os.path.join(model_dir, "eegcnn1d_weights_v1.pth")
-    if os.path.exists(old_weights) and not os.path.exists(v1_weights):
-        import shutil
-        shutil.copy2(old_weights, v1_weights)
+    if "versions" not in config:
+        old_weights = os.path.join(model_dir, "eegcnn1d_weights.pth")
+        v1_weights = os.path.join(model_dir, "eegcnn1d_weights_v1.pth")
+        if os.path.exists(old_weights) and not os.path.exists(v1_weights):
+            import shutil
+            shutil.copy2(old_weights, v1_weights)
 
-    config["active_version"] = "v1"
-    config["versions"] = [{
-        "version": "v1",
-        "type": "original",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }]
-    _write_config(model_dir, config)
+        config["active_version"] = "v1"
+        config["versions"] = [{
+            "version": "v1",
+            "type": "original",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }]
+        changed = True
+
+    v1_entry = next((v for v in config.get("versions", []) if v["version"] == "v1"), None)
+    if v1_entry and "metrics" not in v1_entry:
+        test_metrics_path = os.path.join(model_dir, "test_metrics.json")
+        if os.path.isfile(test_metrics_path):
+            with open(test_metrics_path) as f:
+                tm = json.load(f)
+            v1_entry["metrics"] = {
+                "accuracy": round(tm.get("test_accuracy", 0) / 100, 4),
+                "recall": round(tm.get("sensitivity", 0), 4),
+                "specificity": round(tm.get("specificity", 0), 4),
+            }
+            changed = True
+
+    if changed:
+        _write_config(model_dir, config)
 
 
 def get_active_version(model_dir="model"):
@@ -217,19 +233,57 @@ def fine_tune(model, X, y, train_mean, train_std, device,
     return history
 
 
-def save_retrained_model(train_model, model_dir, new_version_num, training_samples):
+def compute_metrics(model, X, y, train_mean, train_std, device):
+    mean_2d = train_mean.squeeze(0)
+    std_2d = train_std.squeeze(0)
+    if mean_2d.ndim == 2:
+        mean_2d = mean_2d[:, :1]
+        std_2d = std_2d[:, :1]
+
+    X_norm = (X - mean_2d) / (std_2d + 1e-8)
+    X_tensor = torch.tensor(X_norm, dtype=torch.float32).to(device)
+
+    with torch.no_grad():
+        preds = model(X_tensor).argmax(1).cpu().numpy()
+
+    tp = int(((preds == 1) & (y == 1)).sum())
+    fp = int(((preds == 1) & (y == 0)).sum())
+    tn = int(((preds == 0) & (y == 0)).sum())
+    fn = int(((preds == 0) & (y == 1)).sum())
+
+    total = tp + fp + tn + fn
+    accuracy = (tp + tn) / total if total else 0
+    recall = tp / (tp + fn) if (tp + fn) else 0
+    precision = tp / (tp + fp) if (tp + fp) else 0
+    specificity = tn / (tn + fp) if (tn + fp) else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0
+
+    return {
+        "accuracy": round(accuracy, 4),
+        "recall": round(recall, 4),
+        "precision": round(precision, 4),
+        "specificity": round(specificity, 4),
+        "f1": round(f1, 4),
+        "confusion_matrix": {"tp": tp, "fp": fp, "tn": tn, "fn": fn},
+    }
+
+
+def save_retrained_model(train_model, model_dir, new_version_num, training_samples, metrics=None):
     version_str = f"v{new_version_num}"
     path = weights_path_for_version(model_dir, version_str)
     torch.save(train_model.state_dict(), path)
 
     config = _read_config(model_dir)
     config.setdefault("versions", [])
-    config["versions"].append({
+    entry = {
         "version": version_str,
         "type": "retrained",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "training_samples": training_samples,
-    })
+    }
+    if metrics:
+        entry["metrics"] = metrics
+    config["versions"].append(entry)
     _write_config(model_dir, config)
 
 
@@ -242,8 +296,10 @@ def run_retrain(model, train_mean, train_std, device, supabase,
     history = fine_tune(train_model, X, y, train_mean, train_std, device,
                         lr=lr, epochs=epochs)
 
+    metrics = compute_metrics(train_model, X, y, train_mean, train_std, device)
+
     new_version_num = get_next_version_num(model_dir)
-    save_retrained_model(train_model, model_dir, new_version_num, len(X))
+    save_retrained_model(train_model, model_dir, new_version_num, len(X), metrics)
 
     return {
         "new_version": f"v{new_version_num}",
@@ -252,5 +308,6 @@ def run_retrain(model, train_mean, train_std, device, supabase,
         "seizure_samples": int((y == 1).sum()),
         "normal_samples": int((y == 0).sum()),
         "skipped_entries": skipped,
+        "metrics": metrics,
         "history": history,
     }
