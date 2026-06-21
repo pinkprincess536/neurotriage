@@ -26,7 +26,7 @@ export default function Login({ onLogin }) {
       }
 
       const data = await res.json();
-      onLogin(data.token);
+      onLogin(data.token, data.role);
     } catch (err) {
       setError(err.message);
     } finally {

@@ -13,12 +13,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from retrain import run_retrain, get_active_version, migrate_config, list_versions, activate_model
 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DOCTOR_PASSWORD = os.getenv("DOCTOR_PASSWORD", "eeg-demo")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "eeg-admin")
+
+sessions = {}
 
 
 EEG_CHANNELS = [
@@ -74,12 +78,14 @@ def load_model(model_dir):
     import json
 
     config_path=os.path.join(model_dir,"model_config.json")
-    weights_path=os.path.join(model_dir,"eegcnn1d_weights.pth")
     mean_path=os.path.join(model_dir,"train_mean.npy")
     std_path=os.path.join(model_dir,"train_std.npy")
     
     with open(config_path, "r") as f:
         config = json.load(f)
+
+    active = config.get("active_version", "v1")
+    weights_path = os.path.join(model_dir, f"eegcnn1d_weights_{active}.pth")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = EEGCNN1D(n_channels=config.get("n_channels", 22))
@@ -162,17 +168,18 @@ async def lifespan(app: FastAPI):
     global model, train_mean, train_std, device, supabase
     print("Connecting to Supabase...")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    
-    # Try to ensure the eeg-recordings bucket exists
+
     try:
         supabase.storage.create_bucket("eeg-recordings", options={"public": False})
         print("Bucket 'eeg-recordings' created or verified.")
     except Exception as e:
         print(f"Note: Could not automatically create bucket (already exists or key lacks permissions): {e}")
 
+    print("Migrating model config...")
+    migrate_config("model/")
     print("Loading model...")
     model, train_mean, train_std, device = load_model("model/")
-    print("Model loaded. Ready for requests.")
+    print(f"Model loaded (active: {get_active_version('model/')}). Ready for requests.")
     yield
 
 
@@ -193,8 +200,15 @@ def health():
 
 @app.post("/login")
 def login(data: dict):
-    if data.get("password") == DOCTOR_PASSWORD:
-        return {"token": "doctor-session", "role": "doctor"}
+    password = data.get("password")
+    if password == ADMIN_PASSWORD:
+        token = uuid_lib.uuid4().hex
+        sessions[token] = "admin"
+        return {"token": token, "role": "admin"}
+    if password == DOCTOR_PASSWORD:
+        token = uuid_lib.uuid4().hex
+        sessions[token] = "doctor"
+        return {"token": token, "role": "doctor"}
     raise HTTPException(401, "Wrong password")
 
 
@@ -264,7 +278,7 @@ async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float
             "total_windows": len(windows),
             "flagged_windows": len(flagged_indices),
             "threshold_used": threshold,
-            "model_version": "v1",
+            "model_version": get_active_version("model/"),
         }).execute()
 
         recording_id = rec.data[0]["id"]
@@ -292,97 +306,64 @@ async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float
 @app.post("/feedback")
 async def save_feedback(request: Request):
     data = await request.json()
+    current_ver = get_active_version("model/")
 
     supabase.table("feedback").insert({
         "recording_id": data["recording_id"],
         "timestamp_sec": data["timestamp_sec"],
         "model_score": data["score"],
         "doctor_label": data["label"],
-        "model_version": "v1",
+        "model_version": current_ver,
     }).execute()
 
     with open("feedback.jsonl", "a") as f:
-        json.dump({**data, "model_version": "v1",
+        json.dump({**data, "model_version": current_ver,
                    "submitted_at": datetime.now(timezone.utc).isoformat()}, f)
         f.write("\n")
 
     return {"status": "saved"}
 
 
-@app.post("/admin/promote")
-async def promote_model():
-    global model, train_mean, train_std, device
-    
-    candidate_dir = "model/candidate"
-    prod_dir = "model"
-    
-    status_path = os.path.join(candidate_dir, "retraining_status.json")
-    if not os.path.exists(status_path):
-        raise HTTPException(status_code=400, detail="No candidate model status found. Please run evaluate_promote.py first.")
-        
-    with open(status_path, "r") as f:
-        status_info = json.load(f)
-        
-    if status_info.get("status") != "ready":
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Candidate model is not ready for promotion. Status: {status_info.get('status')}. Reason: {status_info.get('reason')}"
-        )
-        
-    # Copy files from candidate to prod
+def require_admin(request: Request):
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+    if sessions.get(token) != "admin":
+        raise HTTPException(403, "Admin access required")
+
+
+@app.post("/retrain")
+async def retrain(request: Request):
+    require_admin(request)
     try:
-        import shutil
-        for filename in ["eegcnn1d_weights.pth", "model_config.json", "test_metrics.json"]:
-            src = os.path.join(candidate_dir, filename)
-            dst = os.path.join(prod_dir, filename)
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-                
-        # Reload model in memory
-        print("Reloading model in FastAPI memory...")
-        model, train_mean, train_std, device = load_model(prod_dir)
-        print("Model reloaded successfully.")
-        
-        # Transition MLflow Staging to Production if MLflow is running and we can query it
-        try:
-            import mlflow
-            from mlflow.tracking import MlflowClient
-            mlflow.set_tracking_uri("sqlite:///mlflow.db")
-            client = MlflowClient()
-            
-            # Transition in MLflow Model Registry
-            cand_config_path = os.path.join(prod_dir, "model_config.json")
-            with open(cand_config_path) as f:
-                cand_config = json.load(f)
-            new_version = cand_config.get("model_version", "v2")
-            
-            try:
-                mv_list = client.search_model_versions("name='EEGCNN1D'")
-                if mv_list:
-                    latest_mv = sorted(mv_list, key=lambda x: int(x.version), reverse=True)[0]
-                    client.transition_model_version_stage(
-                        name="EEGCNN1D",
-                        version=latest_mv.version,
-                        stage="Production",
-                        archive_existing_versions=True
-                    )
-                    print(f"MLflow model version {latest_mv.version} transitioned to Production.")
-            except Exception as registry_err:
-                print(f"Note: MLflow registry transition skipped: {registry_err}")
-        except Exception as mlflow_err:
-            print(f"Note: MLflow tracking connection skipped: {mlflow_err}")
-            
-        # Get updated config
-        config_path = os.path.join(prod_dir, "model_config.json")
-        with open(config_path) as f:
-            config = json.load(f)
-            
-        return {
-            "status": "promoted",
-            "message": "Candidate model successfully promoted to production and reloaded in memory.",
-            "version": config.get("model_version", "v2"),
-            "metrics": status_info.get("candidate_metrics")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to promote model: {str(e)}")
+        result = run_retrain(
+            model=model,
+            train_mean=train_mean,
+            train_std=train_std,
+            device=device,
+            supabase=supabase,
+            model_dir="model/",
+        )
+        return {"status": "success", **result}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/models")
+def get_models(request: Request):
+    require_admin(request)
+    return list_versions("model/")
+
+
+@app.post("/models/activate")
+async def activate(request: Request):
+    require_admin(request)
+    data = await request.json()
+    version_str = data.get("version")
+    if not version_str:
+        raise HTTPException(400, "version is required")
+    try:
+        activate_model(model, "model/", version_str, device)
+        return {"status": "success", "active_version": version_str}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
