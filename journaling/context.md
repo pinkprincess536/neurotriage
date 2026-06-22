@@ -269,12 +269,51 @@ python download_samples.py
 
 ---
 
-## 11. Next Steps (Priority Order)
+## 11. MLOps + DevOps Roadmap
 
-1. Add `/feedback` endpoint + wire React ✓/✗ to save to `feedback.jsonl`
-2. Deploy model to Hugging Face Hub (model registry)
-3. Deploy backend on Render/Railway (free)
-4. Deploy frontend on Vercel (free)
-5. Feedback loop: retrain with collected doctor labels, compare recall, auto-deploy
-6. Multi-seed evaluation (3 seeds per weight) for reliable hyperparameter selection
-7. Integrate test samples (chb24 for seizure, chb06 for normal) into React demo
+### Original Plan
+
+#### ML (what's almost done)
+
+| Task | Status |
+|---|---|
+| Model training pipeline | Done (notebooks) |
+| Inference API | Done |
+| Feedback collection → retraining | Done |
+| Model versioning + activation | Done |
+| Evaluation metrics per model version | Done |
+| Experiment tracking (MLflow) | Partially in notebook, not integrated into retraining |
+
+#### DevOps
+
+| Task | What it involves | Status |
+|---|---|---|
+| Dockerfile | Containerize the FastAPI backend | Done |
+| Docker Compose | Backend + frontend for local dev | Done |
+| CI/CD (GitHub Actions) | Lint, test, build Docker image, push to registry | Done |
+| Automated tests | API tests for /retrain, /models, /upload, /feedback | Done (13 tests) |
+| Environment management | .env.example, secrets handling, staging vs production configs | Done |
+| Deployment config | Railway / Render / AWS — wherever you want to deploy | Not started |
+| Health monitoring | /health endpoint is there, add model version + uptime info | Partial |
+
+### Execution Order (agreed upon)
+
+1. ~~Finish model metrics~~ — DONE (compute_metrics, confusion matrix, per-version metrics)
+2. ~~Dockerfile + Docker Compose~~ — DONE (backend + frontend containers, nginx, .dockerignore)
+3. ~~API tests (pytest)~~ — DONE (13 tests, mocked Supabase, auth verification)
+4. ~~GitHub Actions CI/CD~~ — DONE (test job → docker build job, triggered on push)
+5. MLflow integration — NOT STARTED (experiment tracking for retraining runs)
+6. Deployment — NOT STARTED (Railway/Render, auto-deploy from CI/CD)
+7. README — NOT STARTED (final documentation with everything included)
+
+### Key Decisions Made
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Retrained models stay inactive | Admin manually activates | Prevents bad models from affecting doctors |
+| Training metrics (not test metrics) | Evaluate on training data | Too few feedback samples to split train/test |
+| CPU-only PyTorch in Docker | 200MB vs 2GB | Model is tiny (0.66MB), CPU inference is instant |
+| Multi-stage frontend build | Node build → Nginx serve | 25MB final image vs 300MB with Node |
+| Mocked Supabase in tests | MagicMock | Tests run without real database |
+| CORS + backend URL via env vars | Not hardcoded | Production-ready configuration |
+| Option B for deployment order | Deploy last after full pipeline | Better showcase of MLOps practices |
