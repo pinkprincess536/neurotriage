@@ -1,0 +1,8 @@
+INFO:     Started server process [12360]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+C:\Users\ASUS\eeg\backend.py:98: RuntimeWarning: Channel names are not unique, found duplicates for: {'T8-P8'}. Applying running numbers for duplicates.
+  raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
+C:\Users\ASUS\eeg\backend.py:98: RuntimeWarning: Channel names are not unique, found duplicates for: {'T8-P8'}. Applying running numbers for duplicates.
+  raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)

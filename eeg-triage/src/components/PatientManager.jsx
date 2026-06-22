@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { BACKEND_URL } from "../config";
 
-export default function PatientManager({ patientId, onSelect }) {
+export default function PatientManager({ token, patientId, onSelect }) {
   const [patients, setPatients] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
@@ -12,7 +12,9 @@ export default function PatientManager({ patientId, onSelect }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/patients`);
+        const res = await fetch(`${BACKEND_URL}/patients`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         if (res.ok) {
           const data = await res.json();
           setPatients(data.patients);
@@ -23,7 +25,7 @@ export default function PatientManager({ patientId, onSelect }) {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (showAdd) inputRef.current?.focus();
@@ -35,7 +37,10 @@ export default function PatientManager({ patientId, onSelect }) {
     try {
       const res = await fetch(`${BACKEND_URL}/patients`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ name: newName.trim() }),
       });
       if (!res.ok) throw new Error("Failed to add patient");

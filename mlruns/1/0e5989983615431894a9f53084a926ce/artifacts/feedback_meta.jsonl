@@ -1,0 +1,6 @@
+{"feedback_id": 1, "recording_id": 2, "filename": "chb01_15.edf", "timestamp_sec": 1748.7, "model_score": 0.9955, "doctor_label": "seizure", "label_val": 1, "model_version": "v1"}
+{"feedback_id": 2, "recording_id": 3, "filename": "chb01_15.edf", "timestamp_sec": 1763.4, "model_score": 0.9997, "doctor_label": "seizure", "label_val": 1, "model_version": "v1"}
+{"feedback_id": 3, "recording_id": 3, "filename": "chb01_15.edf", "timestamp_sec": 1758.5, "model_score": 0.9984, "doctor_label": "normal", "label_val": 0, "model_version": "v1"}
+{"feedback_id": 4, "recording_id": 3, "filename": "chb01_15.edf", "timestamp_sec": 1748.7, "model_score": 0.9955, "doctor_label": "normal", "label_val": 0, "model_version": "v1"}
+{"feedback_id": 5, "recording_id": 3, "filename": "chb01_15.edf", "timestamp_sec": 1768.3, "model_score": 0.9844, "doctor_label": "normal", "label_val": 0, "model_version": "v1"}
+{"feedback_id": 6, "recording_id": 3, "filename": "chb01_15.edf", "timestamp_sec": 1783, "model_score": 0.726, "doctor_label": "seizure", "label_val": 1, "model_version": "v1"}

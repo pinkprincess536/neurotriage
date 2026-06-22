@@ -1,0 +1,38 @@
+# Production stack for the AWS VM: FastAPI backend + Caddy (auto-HTTPS reverse proxy).
+# Frontend is NOT here — it deploys separately to Vercel.
+#
+# Usage on the VM:
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8000"            # internal to the compose network only (not published to host)
+    volumes:
+      - ./model:/app/model
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env         # provides DOMAIN and ACME_EMAIL
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  caddy_data:
+  caddy_config:

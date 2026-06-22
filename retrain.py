@@ -11,6 +11,80 @@ import torch.nn as nn
 
 from eeg_core import process_edf
 
+RETRAIN_MIN_SAMPLES = int(os.getenv("RETRAIN_MIN_SAMPLES", "25"))
+
+
+def _stratified_split(y, val_frac=0.2, seed=42):
+    rng = np.random.RandomState(seed)
+    train_idx, val_idx = [], []
+    for cls in np.unique(y):
+        cls_idx = np.where(y == cls)[0]
+        rng.shuffle(cls_idx)
+        n_val = int(round(len(cls_idx) * val_frac)) if len(cls_idx) > 1 else 0
+        val_idx.extend(cls_idx[:n_val].tolist())
+        train_idx.extend(cls_idx[n_val:].tolist())
+    train_idx = np.array(sorted(train_idx), dtype=int)
+    val_idx = np.array(sorted(val_idx), dtype=int)
+    fell_back = False
+    if len(val_idx) == 0:
+        val_idx = train_idx
+        fell_back = True
+    return train_idx, val_idx, fell_back
+
+
+def _baseline_metrics(config, model_dir):
+    for v in config.get("versions", []):
+        if v.get("version") == "v1" or v.get("type") == "original":
+            m = v.get("metrics") or {}
+            if "recall" in m and "specificity" in m:
+                return m["recall"], m["specificity"]
+    tm_path = os.path.join(model_dir, "test_metrics.json")
+    if os.path.isfile(tm_path):
+        with open(tm_path) as f:
+            tm = json.load(f)
+        return tm.get("sensitivity"), tm.get("specificity")
+    return None, None
+
+
+def check_promotion_gate(model_dir, version_str, spec_tolerance=0.02):
+    config = _read_config(model_dir)
+    entry = next((v for v in config.get("versions", []) if v.get("version") == version_str), None)
+    if entry is None:
+        return {"ok": False, "reason": f"Unknown version {version_str}"}
+    if entry.get("type") != "retrained":
+        return {"ok": True, "reason": "Original version; promotion gate not applied."}
+
+    metrics = entry.get("metrics") or {}
+    if "recall" not in metrics or "specificity" not in metrics:
+        return {"ok": True, "reason": "No metrics available; promotion gate skipped."}
+
+    baseline_recall, baseline_spec = _baseline_metrics(config, model_dir)
+    if baseline_recall is None or baseline_spec is None:
+        return {"ok": True, "reason": "No baseline metrics; promotion gate skipped."}
+
+    cand_recall = metrics["recall"]
+    cand_spec = metrics["specificity"]
+    gate_recall = cand_recall >= baseline_recall
+    gate_spec = cand_spec >= (baseline_spec - spec_tolerance)
+
+    result = {
+        "baseline": {"recall": round(baseline_recall, 4), "specificity": round(baseline_spec, 4)},
+        "candidate": {"recall": round(cand_recall, 4), "specificity": round(cand_spec, 4)},
+    }
+    if gate_recall and gate_spec:
+        result["ok"] = True
+        result["reason"] = "Passed promotion gate."
+        return result
+
+    reasons = []
+    if not gate_recall:
+        reasons.append(f"recall {cand_recall:.4f} < baseline {baseline_recall:.4f}")
+    if not gate_spec:
+        reasons.append(f"specificity {cand_spec:.4f} < {baseline_spec - spec_tolerance:.4f}")
+    result["ok"] = False
+    result["reason"] = "; ".join(reasons)
+    return result
+
 
 def _read_config(model_dir):
     config_path = os.path.join(model_dir, "model_config.json")
@@ -288,15 +362,30 @@ def save_retrained_model(train_model, model_dir, new_version_num, training_sampl
 
 
 def run_retrain(model, train_mean, train_std, device, supabase,
-                model_dir="model", lr=0.0001, epochs=5):
+                model_dir="model", lr=0.0001, epochs=5, min_samples=None):
+    if min_samples is None:
+        min_samples = RETRAIN_MIN_SAMPLES
+
     X, y, skipped = build_training_data(supabase, train_mean, train_std)
+
+    if len(X) < min_samples:
+        raise ValueError(
+            f"Need at least {min_samples} feedback labels to retrain, got {len(X)}. "
+            f"Collect more doctor feedback or lower RETRAIN_MIN_SAMPLES."
+        )
+
+    train_idx, val_idx, fell_back = _stratified_split(y, val_frac=0.2)
+    X_train, y_train = X[train_idx], y[train_idx]
+    X_val, y_val = X[val_idx], y[val_idx]
 
     train_model = copy.deepcopy(model)
 
-    history = fine_tune(train_model, X, y, train_mean, train_std, device,
+    history = fine_tune(train_model, X_train, y_train, train_mean, train_std, device,
                         lr=lr, epochs=epochs)
 
-    metrics = compute_metrics(train_model, X, y, train_mean, train_std, device)
+    metrics = compute_metrics(train_model, X_val, y_val, train_mean, train_std, device)
+    metrics["evaluated_on"] = "train" if fell_back else "validation"
+    metrics["eval_samples"] = len(X_val)
 
     new_version_num = get_next_version_num(model_dir)
     save_retrained_model(train_model, model_dir, new_version_num, len(X), metrics)
@@ -305,6 +394,8 @@ def run_retrain(model, train_mean, train_std, device, supabase,
         "new_version": f"v{new_version_num}",
         "activated": False,
         "training_samples": len(X),
+        "train_samples": len(X_train),
+        "val_samples": len(X_val),
         "seizure_samples": int((y == 1).sum()),
         "normal_samples": int((y == 0).sum()),
         "skipped_entries": skipped,

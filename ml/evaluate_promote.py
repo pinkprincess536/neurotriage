@@ -43,12 +43,12 @@ def main():
     candidate_spec = cand_metrics.get("specificity", 0.0)
     
     print("Evaluating Candidate Model Gates:")
-    print(f"  Feedback count: {feedback_count} (Required: >= 20)")
+    print(f"  Feedback count: {feedback_count} (Required: >= 25)")
     print(f"  Recall (Sensitivity): Candidate {candidate_recall:.4f} vs Baseline {baseline_recall:.4f}")
     print(f"  Specificity: Candidate {candidate_spec:.4f} vs Baseline {baseline_spec:.4f} (Guardrail: >= {baseline_spec - 0.02:.4f})")
     
     # Check gates
-    gate_feedback = feedback_count >= 20
+    gate_feedback = feedback_count >= 25
     gate_recall = candidate_recall >= baseline_recall
     gate_spec = candidate_spec >= (baseline_spec - 0.02)
     

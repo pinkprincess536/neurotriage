@@ -8,19 +8,32 @@ import os
 import shutil
 import json
 import uuid as uuid_lib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import secrets
+import jwt
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from retrain import run_retrain, get_active_version, migrate_config, list_versions, activate_model
+from eeg_core import EEGCNN1D, process_edf, score_windows
+from retrain import (
+    run_retrain, get_active_version, migrate_config, list_versions,
+    activate_model, check_promotion_gate,
+)
 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-DOCTOR_PASSWORD = os.getenv("DOCTOR_PASSWORD", "eeg-demo")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "eeg-admin")
+DOCTOR_PASSWORD = os.getenv("DOCTOR_PASSWORD")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+if not DOCTOR_PASSWORD or not ADMIN_PASSWORD:
+    raise RuntimeError("DOCTOR_PASSWORD and ADMIN_PASSWORD must be set")
+
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    JWT_SECRET = secrets.token_hex(32)
+    print("WARNING: JWT_SECRET not set; using an ephemeral secret. "
+          "Tokens will be invalidated on restart. Set JWT_SECRET in production.")
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "12"))
 
 CORS_ORIGINS = [
     o.strip() for o in os.getenv(
@@ -29,57 +42,38 @@ CORS_ORIGINS = [
     ).split(",")
 ]
 
-sessions = {}
+
+def create_token(role):
+    payload = {
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-EEG_CHANNELS = [
-    "FP1-F7", "F7-T7", "T7-P7", "P7-O1",
-    "FP1-F3", "F3-C3", "C3-P3", "P3-O1",
-    "FP2-F4", "F4-C4", "C4-P4", "P4-O2",
-    "FP2-F8", "F8-T8", "T8-P8", "P8-O2",
-    "FZ-CZ", "CZ-PZ",
-    "P7-T7", "T7-FT9", "FT9-FT10", "FT10-T8",
-]
-
-WINDOW_SIZE_SEC = 7.0
-OVERLAP = 0.3
-LOWCUT = 0.5
-HIGHCUT = 40.0
-NOTCH_FREQ = 60.0
+def get_role(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    token = auth[len("Bearer "):]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return None
+    return payload.get("role")
 
 
-class EEGCNN1D(nn.Module):
-    def __init__(self, n_channels=22, n_classes=2):
-        super().__init__()
+def require_session(request: Request):
+    role = get_role(request)
+    if role not in ("admin", "doctor"):
+        raise HTTPException(401, "Authentication required")
+    return role
 
-        self.conv1 = nn.Conv1d(n_channels, 32, kernel_size=7, padding=3)
-        self.bn1 = nn.BatchNorm1d(32)
-        self.pool1 = nn.MaxPool1d(4)
 
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, padding=2)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.pool2 = nn.MaxPool1d(4)
+def require_admin(request: Request):
+    if get_role(request) != "admin":
+        raise HTTPException(403, "Admin access required")
 
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(128)
-        self.adapt = nn.AdaptiveAvgPool1d(16)
-
-        self.drop1 = nn.Dropout(0.4)
-        self.fc1 = nn.Linear(128 * 16, 64)
-        self.drop2 = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(64, n_classes)
-
-    def forward(self, x):
-        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
-        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = self.adapt(x)
-        x = torch.flatten(x, 1)
-        x = self.drop1(x)
-        x = F.relu(self.fc1(x))
-        x = self.drop2(x)
-        x = self.fc2(x)
-        return x
 
 def load_model(model_dir):
     import json
@@ -104,64 +98,6 @@ def load_model(model_dir):
     train_std = np.load(std_path)
 
     return model, train_mean, train_std, device
-
-def process_edf(edf_path):
-    import mne
-
-    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
-    sfreq = raw.info["sfreq"]
-
-    available = raw.ch_names
-    channels_to_use = [ch for ch in EEG_CHANNELS if ch in available]
-    if len(channels_to_use) < 18:
-        raise ValueError(f"Only {len(channels_to_use)} matching channels found")
-
-    raw.pick_channels(channels_to_use)
-    raw.filter(LOWCUT, HIGHCUT, fir_design="firwin", verbose=False)
-    raw.notch_filter(freqs=NOTCH_FREQ, verbose=False)
-    signal = raw.get_data()
-    n_chan = signal.shape[0]
-
-    ws = int(WINDOW_SIZE_SEC * sfreq)
-    stride = int(ws * (1 - OVERLAP))
-    total = signal.shape[1]
-
-    windows = []
-    timestamps = []
-    for start in range(0, total - ws + 1, stride):
-        windows.append(signal[:, start:start + ws])
-        timestamps.append(start / sfreq)
-
-    windows = np.array(windows, dtype=np.float32)
-    timestamps = np.array(timestamps)
-
-    if n_chan < len(EEG_CHANNELS):
-        pad = np.zeros(
-            (windows.shape[0], len(EEG_CHANNELS) - n_chan, windows.shape[2]),
-            dtype=np.float32,
-        )
-        windows = np.concatenate([windows, pad], axis=1)
-
-    duration_sec = total / sfreq
-    return windows, timestamps, duration_sec
-
-def score_windows(model, windows, train_mean, train_std, device):
-    mean_2d = train_mean.squeeze(0)
-    std_2d = train_std.squeeze(0)
-
-    if mean_2d.ndim == 2:
-        mean_2d = mean_2d[:, :1]
-        std_2d = std_2d[:, :1]
-
-    X = (windows - mean_2d) / (std_2d + 1e-8)
-
-    X_tensor = torch.tensor(X, dtype=torch.float32).to(device)
-
-    with torch.no_grad():
-        outputs = model(X_tensor)
-        probs = torch.softmax(outputs, dim=1)[:, 1]
-
-    return probs.cpu().numpy()
 
 
 model = None
@@ -209,30 +145,29 @@ def health():
 def login(data: dict):
     password = data.get("password")
     if password == ADMIN_PASSWORD:
-        token = uuid_lib.uuid4().hex
-        sessions[token] = "admin"
-        return {"token": token, "role": "admin"}
+        return {"token": create_token("admin"), "role": "admin"}
     if password == DOCTOR_PASSWORD:
-        token = uuid_lib.uuid4().hex
-        sessions[token] = "doctor"
-        return {"token": token, "role": "doctor"}
+        return {"token": create_token("doctor"), "role": "doctor"}
     raise HTTPException(401, "Wrong password")
 
 
 @app.get("/patients")
-def list_patients():
+def list_patients(request: Request):
+    require_session(request)
     res = supabase.table("patients").select("*").order("created_at", desc=True).execute()
     return {"patients": res.data}
 
 
 @app.post("/patients")
 async def create_patient(request: Request):
+    require_session(request)
     data = await request.json()
     res = supabase.table("patients").insert({"name": data["name"]}).execute()
     return {"patient": res.data[0]}
 
 @app.post("/patients/{patient_id}/upload")
-async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float = 0.70):
+async def upload_for_patient(patient_id: int, file: UploadFile, request: Request, threshold: float = 0.70):
+    require_session(request)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".edf") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
@@ -312,6 +247,7 @@ async def upload_for_patient(patient_id: int, file: UploadFile, threshold: float
 
 @app.post("/feedback")
 async def save_feedback(request: Request):
+    require_session(request)
     data = await request.json()
     current_ver = get_active_version("model/")
 
@@ -323,19 +259,7 @@ async def save_feedback(request: Request):
         "model_version": current_ver,
     }).execute()
 
-    with open("feedback.jsonl", "a") as f:
-        json.dump({**data, "model_version": current_ver,
-                   "submitted_at": datetime.now(timezone.utc).isoformat()}, f)
-        f.write("\n")
-
     return {"status": "saved"}
-
-
-def require_admin(request: Request):
-    auth = request.headers.get("Authorization", "")
-    token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
-    if sessions.get(token) != "admin":
-        raise HTTPException(403, "Admin access required")
 
 
 @app.post("/retrain")
@@ -368,9 +292,17 @@ async def activate(request: Request):
     version_str = data.get("version")
     if not version_str:
         raise HTTPException(400, "version is required")
+    force = bool(data.get("force", False))
+    gate = check_promotion_gate("model/", version_str)
+    if not gate["ok"] and not force:
+        raise HTTPException(
+            400,
+            f"Activation blocked by promotion gate: {gate['reason']}. "
+            f"Send force=true to override.",
+        )
     try:
         activate_model(model, "model/", version_str, device)
-        return {"status": "success", "active_version": version_str}
+        return {"status": "success", "active_version": version_str, "gate": gate}
     except ValueError as e:
         raise HTTPException(400, str(e))
 

@@ -1,16 +1,39 @@
-# React + Vite
+# EEG Seizure Triage — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite single-page app for the EEG Seizure Triage Assistant. Doctors upload
+EEG recordings and review AI-flagged windows; admins manage and retrain model versions.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev      # start dev server (default http://localhost:5173)
+npm run build    # production build to dist/
+npm run preview  # preview the production build
+```
 
-## React Compiler
+## Configuration
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The frontend talks to the backend via a single env var:
 
-## Expanding the ESLint configuration
+| Variable | Description | Default |
+|---|---|---|
+| `VITE_BACKEND_URL` | Base URL of the FastAPI backend | `http://localhost:8000` |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Set it in `.env` for local dev, or as a build-time env var on your host (e.g. Vercel
+project settings). It is read in `src/config.js` and baked in at build time.
+
+## Structure
+
+| Path | Purpose |
+|---|---|
+| `src/App.jsx` | Root component: auth, doctor + admin views |
+| `src/config.js` | Backend URL config |
+| `src/components/Login.jsx` | Password login |
+| `src/components/PatientManager.jsx` | Select / create patients |
+| `src/components/FileUpload.jsx` | EDF file picker |
+| `src/components/ThresholdSlider.jsx` | Sensitivity control |
+| `src/components/ResultsTable.jsx` | Flagged windows + feedback |
+
+Authenticated calls send `Authorization: Bearer <token>` where the token is the JWT
+returned by the backend `/login` endpoint.

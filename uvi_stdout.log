@@ -1,0 +1,22 @@
+Connecting to Supabase...
+Loading model...
+Model loaded. Ready for requests.
+INFO:     127.0.0.1:57031 - "POST /predict?threshold=0.7 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57031 - "POST /predict?threshold=0.7 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58185 - "POST /predict?threshold=0.7 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59026 - "OPTIONS /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59026 - "POST /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59026 - "GET /patients HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58251 - "GET /patients HTTP/1.1" 200 OK
+NOTE: pick_channels() is a legacy function. New code should use inst.pick(...).
+Error processing upload: {'statusCode': 404, 'error': Bucket not found, 'message': Bucket not found}
+INFO:     127.0.0.1:57090 - "POST /patients/6/upload?threshold=0.7 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:61747 - "OPTIONS /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61747 - "POST /login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61747 - "GET /patients HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61747 - "GET /patients HTTP/1.1" 200 OK
+NOTE: pick_channels() is a legacy function. New code should use inst.pick(...).
+Error processing upload: {'statusCode': 404, 'error': Bucket not found, 'message': Bucket not found}
+INFO:     127.0.0.1:54602 - "POST /patients/6/upload?threshold=0.7 HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:62680 - "GET /patients HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62680 - "GET /patients HTTP/1.1" 200 OK

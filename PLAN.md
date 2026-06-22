@@ -71,12 +71,30 @@ An ML-powered EEG seizure detection system with a **complete MLOps lifecycle**:
 - [ ] Log each retrain to MLflow tracking server
 - [ ] Store model artifacts in MLflow
 
-### Phase 10: Deployment (NOT STARTED)
-- [ ] Deploy backend to Railway/Render
-- [ ] Deploy frontend to Railway/Render/Vercel
-- [ ] Configure production env vars (CORS_ORIGINS, VITE_BACKEND_URL, Supabase)
-- [ ] Add deploy step to CI/CD pipeline (auto-deploy on green tests)
-- [ ] HTTPS configuration
+### Phase 10: Deployment — Backend on AWS VM, Frontend on Vercel (NOT STARTED)
+
+**Target topology:** Backend container runs on an AWS EC2 VM; React frontend builds + serves on Vercel; Supabase stays as managed DB + storage.
+
+> Config delivered: `docker-compose.prod.yml` (backend + Caddy auto-HTTPS), `Caddyfile`, `eeg-triage/vercel.json`, env vars in `.env.example`, and full step-by-step in **`DEPLOY.md`** (includes VM sizing). Remaining boxes below are manual provisioning steps.
+
+**Backend (AWS EC2 VM):**
+- [ ] Provision EC2 instance (Docker + docker-compose installed)
+- [ ] Open AWS Security Group ports: 80 + 443 (and 22 for SSH); do NOT expose 8000 publicly
+- [ ] Point a domain/subdomain at the VM (e.g. `api.<yourdomain>`) — required for TLS
+- [x] Put a reverse proxy in front of the backend (Caddy or nginx) terminating HTTPS via Let's Encrypt → fixes browser mixed-content (Vercel is HTTPS, so the API MUST be HTTPS) — *config: `Caddyfile` + `docker-compose.prod.yml`*
+- [ ] Run backend via docker-compose (backend service only) on the VM
+- [ ] Set backend env on the VM: `SUPABASE_URL`, `SUPABASE_KEY`, `CORS_ORIGINS` (= the Vercel URL), strong `ADMIN_PASSWORD` / `DOCTOR_PASSWORD`
+- [ ] Bind-mount `model/` as a Docker volume so retrained weights + `model_config.json` survive image rebuilds (see Phase 12)
+
+**Frontend (Vercel):**
+- [ ] Create Vercel project, set Root Directory = `eeg-triage` (auto-detects Vite)
+- [ ] Set Vercel env var `VITE_BACKEND_URL` = the HTTPS backend URL (Vercel bakes it at build time per deploy — no runtime-config hack needed)
+- [x] (Optional) `vercel.json` with SPA rewrite to `/index.html` for future routing — *added in `eeg-triage/vercel.json`*
+
+**Cross-cutting:**
+- [ ] Verify CORS: backend `CORS_ORIGINS` must include the exact Vercel origin
+- [ ] Smoke test full flow over HTTPS (login → upload → feedback → admin retrain/activate)
+- [ ] (Optional) Add deploy step to CI/CD (SSH deploy to VM on green tests)
 
 ### Phase 11: README (NOT STARTED)
 - [ ] Project overview + architecture diagram
@@ -85,6 +103,45 @@ An ML-powered EEG seizure detection system with a **complete MLOps lifecycle**:
 - [ ] API endpoints, environment variables
 - [ ] Model details + MLOps pipeline explanation
 - [ ] Roadmap
+
+---
+
+## Hardening & Fixes Roadmap (NOT STARTED)
+
+> Issues surfaced during full-codebase review. **Recommended order: do Phase 12 + 13 BEFORE the public Phase 10 deploy** (persistence + security), then deploy, then the rest.
+
+### Phase 12: Persistence (do before public deploy)
+- [x] Bind-mount `model/` as a Docker volume on the VM so retrained weights + `model_config.json` survive container/image rebuilds (VM disk is persistent; volume mount is the fix)
+- [x] Drop the local `feedback.jsonl` write (`backend.py`) — feedback already persists to the Supabase `feedback` table
+- [ ] (Alternative, if ever moving off the VM) offload retrained weights + `model_config.json` to Supabase Storage in `save_retrained_model` / `activate_model` / `load_model`
+
+### Phase 13: Security (do before public deploy)
+- [x] Replace in-memory `sessions` dict with stateless JWT (secret + expiry) → fixes restart loss, multi-instance, and no-expiry in one change
+- [x] Add a `require_session` dependency to the doctor endpoints `/patients` (GET/POST), `/patients/{id}/upload`, `/feedback` (were fully unauthenticated)
+- [x] Send `Authorization: Bearer` header from frontend on those calls (`PatientManager.jsx`, `App.jsx` upload, `ResultsTable.jsx`)
+- [x] Remove hardcoded password defaults (`eeg-demo` / `eeg-admin`); fail fast if `ADMIN_PASSWORD` / `DOCTOR_PASSWORD` unset
+
+### Phase 14: ML Quality & Safety Gates
+- [x] Add train/validation holdout split in `retrain.py` so metrics aren't computed on training data (stratified 80/20; metrics now report `evaluated_on`)
+- [x] Add a promotion gate before a version can be activated (`check_promotion_gate`: recall ≥ baseline, specificity ≥ baseline − 0.02; `force=true` override) + min-feedback gate at retrain (`RETRAIN_MIN_SAMPLES`, default 20)
+- [ ] (Optional) Recompute + save normalization stats per retrain instead of reusing v1 stats
+
+### Phase 15: Reproducibility & Build Hygiene
+- [x] Pin/constrain versions in `requirements.txt`
+- [x] Fix Dockerfile torch double-install — removed `torch` from `requirements.txt` (CPU torch installed once in Dockerfile / CI)
+
+### Phase 16: Maintainability (de-duplication)
+- [x] `EEGCNN1D`, `process_edf`, `score_windows` now imported from `eeg_core.py` in `backend.py` and `inference.py`; duplicate copies deleted (single source of truth)
+
+### Phase 17: Frontend Polish
+- [x] Feedback UX: loading + error states + undo (`ResultsTable.jsx`)
+- [x] Remove dead/unused Supabase env vars from frontend `.env`
+- [x] Add the missing `favicon.svg` (`eeg-triage/public/favicon.svg`)
+- [x] Replace default Vite template README in `eeg-triage/`
+
+### Phase 18: Test Coverage Gaps
+- [x] Add tests for `/patients` (POST) and `/patients/{id}/upload` (mocked inference)
+- [x] Add tests for the doctor-endpoint auth gates and the promotion gate (`tests/test_retrain.py`)
 
 ---
 

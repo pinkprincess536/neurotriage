@@ -73,7 +73,11 @@ export default function App() {
 
       const response = await fetch(
         `${BACKEND_URL}/patients/${patientId}/upload?threshold=${threshold}`,
-        { method: "POST", body: formData }
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        }
       );
 
       if (!response.ok) {
@@ -155,7 +159,7 @@ export default function App() {
 
       {role === "doctor" && (
         <div className="dashboard-content">
-          <PatientManager patientId={patientId} onSelect={setPatientId} />
+          <PatientManager token={token} patientId={patientId} onSelect={setPatientId} />
           <FileUpload file={file} onFileSelect={setFile} />
           <ThresholdSlider threshold={threshold} onChange={setThreshold} />
           <button
@@ -166,7 +170,7 @@ export default function App() {
             {loading ? "Processing..." : "Process Recording"}
           </button>
           {error && <div className="error">{error}</div>}
-          {results && <ResultsTable data={results} />}
+          {results && <ResultsTable token={token} data={results} />}
         </div>
       )}
 

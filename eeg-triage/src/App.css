@@ -233,3 +233,16 @@ td button:hover {
   background: rgba(46, 125, 50, 0.08); border-radius: 6px;
 }
 .retrain-results p { margin-bottom: 8px; font-size: 0.9rem; }
+
+.fb-saving { font-size: 0.85rem; color: var(--text); opacity: 0.7; }
+.fb-saved { font-size: 0.85rem; color: #2e7d32; }
+.fb-error { font-size: 0.85rem; color: #c62828; }
+.fb-change {
+  margin-left: 6px; padding: 1px 6px; font-size: 0.75rem;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); cursor: pointer;
+}
+.fb-error button {
+  margin-left: 4px; padding: 1px 6px; font-size: 0.75rem;
+  border-radius: 4px; cursor: pointer;
+}
