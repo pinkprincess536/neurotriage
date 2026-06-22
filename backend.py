@@ -165,6 +165,32 @@ async def create_patient(request: Request):
     res = supabase.table("patients").insert({"name": data["name"]}).execute()
     return {"patient": res.data[0]}
 
+
+@app.delete("/patients/{patient_id}")
+async def delete_patient(patient_id: int, request: Request):
+    require_session(request)
+    # Delete associated feedback first (via recordings)
+    recordings_res = supabase.table("recordings").select("id").eq("patient_id", patient_id).execute()
+    recording_ids = [r["id"] for r in recordings_res.data]
+    if recording_ids:
+        supabase.table("feedback").delete().in_("recording_id", recording_ids).execute()
+    supabase.table("recordings").delete().eq("patient_id", patient_id).execute()
+    supabase.table("patients").delete().eq("id", patient_id).execute()
+    return {"status": "deleted"}
+
+
+@app.get("/patients/{patient_id}/recordings")
+def get_patient_recordings(patient_id: int, request: Request):
+    require_session(request)
+    res = (
+        supabase.table("recordings")
+        .select("*")
+        .eq("patient_id", patient_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return {"recordings": res.data}
+
 @app.post("/patients/{patient_id}/upload")
 async def upload_for_patient(patient_id: int, file: UploadFile, request: Request, threshold: float = 0.70):
     require_session(request)

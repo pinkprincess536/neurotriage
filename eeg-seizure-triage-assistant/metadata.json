@@ -1,0 +1,6 @@
+{
+  "name": "EEG Seizure Triage Assistant",
+  "description": "Interactive clinical workstation for doctors to automatically analyze long-term 22-channel bipolar EEG recordings, rank seizure segments, and log expert feedback loops.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

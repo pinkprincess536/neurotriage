@@ -1,25 +1,12 @@
 import { useState, useCallback } from "react";
 import Login from "./components/Login";
-import PatientManager from "./components/PatientManager";
-import FileUpload from "./components/FileUpload";
-import ThresholdSlider from "./components/ThresholdSlider";
-import ResultsTable from "./components/ResultsTable";
-import "./App.css";
-
+import DoctorDashboard from "./components/DoctorDashboard";
+import AdminPanel from "./components/AdminPanel";
 import { BACKEND_URL } from "./config";
-
-const fmt = (v) => v != null ? (v * 100).toFixed(1) + "%" : "\u2014";
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("doctor_token"));
   const [role, setRole] = useState(() => localStorage.getItem("doctor_role"));
-  const [patientId, setPatientId] = useState(null);
-
-  const [file, setFile] = useState(null);
-  const [threshold, setThreshold] = useState(0.7);
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
   const [models, setModels] = useState(null);
   const [activating, setActivating] = useState(null);
@@ -32,9 +19,7 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/models`, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
-      if (res.ok) {
-        setModels(await res.json());
-      }
+      if (res.ok) setModels(await res.json());
     } catch {}
   }, []);
 
@@ -43,9 +28,7 @@ export default function App() {
     localStorage.setItem("doctor_role", userRole);
     setToken(userToken);
     setRole(userRole);
-    if (userRole === "admin") {
-      fetchModels(userToken);
-    }
+    if (userRole === "admin") fetchModels(userToken);
   };
 
   const handleLogout = () => {
@@ -53,64 +36,25 @@ export default function App() {
     localStorage.removeItem("doctor_role");
     setToken(null);
     setRole(null);
-    setPatientId(null);
-    setFile(null);
-    setResults(null);
     setModels(null);
     setRetrainResult(null);
-    setError(null);
-  };
-
-  const handleProcess = async () => {
-    if (!file || !patientId) return;
-    setLoading(true);
-    setError(null);
-    setResults(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(
-        `${BACKEND_URL}/patients/${patientId}/upload?threshold=${threshold}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        }
-      );
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.detail || "Prediction failed");
-      }
-
-      const data = await response.json();
-      setResults(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    setRetrainError(null);
   };
 
   const handleRetrain = async () => {
     setRetraining(true);
     setRetrainResult(null);
     setRetrainError(null);
-
     try {
-      const response = await fetch(`${BACKEND_URL}/retrain`, {
+      const res = await fetch(`${BACKEND_URL}/retrain`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (!response.ok) {
-        const err = await response.json();
+      if (!res.ok) {
+        const err = await res.json();
         throw new Error(err.detail || "Retraining failed");
       }
-
-      const data = await response.json();
+      const data = await res.json();
       setRetrainResult(data);
       fetchModels(token);
     } catch (err) {
@@ -125,10 +69,7 @@ export default function App() {
     try {
       const res = await fetch(`${BACKEND_URL}/models/activate`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ version }),
       });
       if (!res.ok) {
@@ -143,146 +84,23 @@ export default function App() {
     }
   };
 
-  if (!token) {
-    return <Login onLogin={handleLogin} />;
+  if (!token) return <Login onLogin={handleLogin} />;
+
+  if (role === "admin") {
+    return (
+      <AdminPanel
+        token={token}
+        models={models}
+        onRetrain={handleRetrain}
+        onActivate={handleActivate}
+        retraining={retraining}
+        retrainResult={retrainResult}
+        retrainError={retrainError}
+        activating={activating}
+        onLogout={handleLogout}
+      />
+    );
   }
 
-  return (
-    <div className="app">
-      <header className="app-header">
-        <h1>EEG Seizure Triage {role === "admin" ? "Admin" : "Assistant"}</h1>
-        <div className="user-info">
-          <span className="role-badge">{role}</span>
-          <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
-        </div>
-      </header>
-
-      {role === "doctor" && (
-        <div className="dashboard-content">
-          <PatientManager token={token} patientId={patientId} onSelect={setPatientId} />
-          <FileUpload file={file} onFileSelect={setFile} />
-          <ThresholdSlider threshold={threshold} onChange={setThreshold} />
-          <button
-            className="process-btn"
-            onClick={handleProcess}
-            disabled={!file || !patientId || loading}
-          >
-            {loading ? "Processing..." : "Process Recording"}
-          </button>
-          {error && <div className="error">{error}</div>}
-          {results && <ResultsTable token={token} data={results} />}
-        </div>
-      )}
-
-      {role === "admin" && (
-        <>
-          {models && (
-            <div className="model-section">
-              <h2>Model Versions</h2>
-              <p className="metrics-note">Metrics evaluated on training data</p>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Version</th>
-                      <th>Type</th>
-                      <th>Date</th>
-                      <th>Samples</th>
-                      <th>Accuracy</th>
-                      <th>Recall</th>
-                      <th>Precision</th>
-                      <th>Specificity</th>
-                      <th>F1</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {models.versions.map((v) => {
-                      const m = v.metrics || {};
-                      return (
-                        <tr key={v.version}>
-                          <td><strong>{v.version}</strong></td>
-                          <td>{v.type}</td>
-                          <td>{v.created_at ? new Date(v.created_at).toLocaleDateString() : "\u2014"}</td>
-                          <td>{v.training_samples ?? "\u2014"}</td>
-                          <td>{fmt(m.accuracy)}</td>
-                          <td>{fmt(m.recall)}</td>
-                          <td>{fmt(m.precision)}</td>
-                          <td>{fmt(m.specificity)}</td>
-                          <td>{fmt(m.f1)}</td>
-                          <td>
-                            {v.version === models.active_version
-                              ? <span className="badge-active">Active</span>
-                              : <span className="badge-inactive">Inactive</span>}
-                          </td>
-                          <td>
-                            {v.version !== models.active_version && (
-                              <button
-                                className="activate-btn"
-                                onClick={() => handleActivate(v.version)}
-                                disabled={activating === v.version}
-                              >
-                                {activating === v.version ? "Activating..." : "Activate"}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className="retrain-section">
-            <h2>Model Retraining</h2>
-            <p className="retrain-desc">
-              Fine-tune the model using doctor feedback. New versions are saved but not activated until you choose.
-            </p>
-            <button
-              className="retrain-btn"
-              onClick={handleRetrain}
-              disabled={retraining}
-            >
-              {retraining ? "Retraining..." : "Retrain Model"}
-            </button>
-
-            {retrainError && <div className="error">{retrainError}</div>}
-
-            {retrainResult && (
-              <div className="retrain-results">
-                <p><strong>{retrainResult.new_version}</strong> saved (not yet active)</p>
-                <p>{retrainResult.training_samples} samples ({retrainResult.seizure_samples} seizure, {retrainResult.normal_samples} normal)</p>
-                {retrainResult.metrics && (
-                  <p>
-                    Accuracy: {fmt(retrainResult.metrics.accuracy)} | Recall: {fmt(retrainResult.metrics.recall)} | Precision: {fmt(retrainResult.metrics.precision)} | F1: {fmt(retrainResult.metrics.f1)}
-                  </p>
-                )}
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Epoch</th>
-                      <th>Loss</th>
-                      <th>Accuracy</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {retrainResult.history.map((h) => (
-                      <tr key={h.epoch}>
-                        <td>{h.epoch}</td>
-                        <td>{h.loss}</td>
-                        <td>{(h.accuracy * 100).toFixed(1)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
+  return <DoctorDashboard token={token} onLogout={handleLogout} />;
 }

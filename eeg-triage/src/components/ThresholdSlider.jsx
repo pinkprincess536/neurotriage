@@ -11,27 +11,32 @@ const THRESHOLD_TABLE = {
   0.95: { recall: 0.36, fa: 62 },
 };
 
-const PRESETS = {
-  Aggressive: 0.50,
-  Balanced: 0.70,
-  Conservative: 0.85,
-};
+const PRESETS = [
+  { label: "Aggressive", value: 0.50, color: "bg-rose-500 hover:bg-rose-600" },
+  { label: "Balanced",   value: 0.70, color: "bg-violet-600 hover:bg-violet-700" },
+  { label: "Conservative", value: 0.85, color: "bg-slate-600 hover:bg-slate-700" },
+];
 
 export default function ThresholdSlider({ threshold, onChange }) {
   const current = THRESHOLD_TABLE[threshold] || THRESHOLD_TABLE[0.70];
 
   return (
-    <div className="threshold-slider">
-      <div className="slider-header">
-        <label>Detection Sensitivity</label>
-        <div className="presets">
-          {Object.entries(PRESETS).map(([label, value]) => (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+          Detection Sensitivity
+        </label>
+        <div className="flex gap-1.5">
+          {PRESETS.map((p) => (
             <button
-              key={label}
-              className={threshold === value ? "preset active" : "preset"}
-              onClick={() => onChange(value)}
+              key={p.label}
+              type="button"
+              onClick={() => onChange(p.value)}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg text-white transition ${
+                threshold === p.value ? p.color : "bg-slate-200 text-slate-500 hover:bg-slate-300"
+              }`}
             >
-              {label}
+              {p.label}
             </button>
           ))}
         </div>
@@ -44,16 +49,32 @@ export default function ThresholdSlider({ threshold, onChange }) {
         step="0.05"
         value={threshold}
         onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full accent-rose-500"
       />
 
-      <div className="slider-labels">
-        <span>Aggressive</span>
-        <span>Conservative</span>
+      <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+        <span>0.50 — More sensitive</span>
+        <span>0.95 — More specific</span>
       </div>
 
-      <p className="slider-stats">
-        At threshold {threshold.toFixed(2)}: ~{(current.recall * 100).toFixed(0)}% recall, ~{current.fa} false alarms/hour
-      </p>
+      <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 flex items-center justify-between text-xs font-mono">
+        <div>
+          <span className="text-slate-400">Threshold </span>
+          <span className="font-bold text-slate-800">{threshold.toFixed(2)}</span>
+        </div>
+        <div className="flex gap-4">
+          <div>
+            <span className="text-slate-400">Recall </span>
+            <span className={`font-bold ${current.recall >= 0.90 ? "text-emerald-600" : current.recall >= 0.70 ? "text-amber-600" : "text-rose-600"}`}>
+              ~{(current.recall * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div>
+            <span className="text-slate-400">FA/hr </span>
+            <span className="font-bold text-slate-700">~{current.fa}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
