@@ -1,9 +1,0 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap');
-@import "tailwindcss";
-
-@theme {
-  --font-sans: "Plus Jakarta Sans", "Outfit", system-ui, sans-serif;
-  --font-mono: "Fira Code", monospace;
-  --color-brand-teal: #14b8a6;
-  --color-brand-rose: #f43f5e;
-}
