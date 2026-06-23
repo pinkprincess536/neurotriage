@@ -1,150 +1,229 @@
-# EEG Triage
+# NeuroTriage
 
-An AI-powered EEG seizure detection and triage system. Neurologists upload EDF recordings, and a 1D CNN model scores each 7-second window for seizure probability — surfacing the most urgent segments first so doctors can review faster.
+**Smart Seizure Triage & Detection Portal**
+
+> AI-assisted EEG analysis that helps neurologists find seizure activity faster — so patients get the right care sooner.
 
 ---
 
-## Architecture
+## The Problem
 
-```
-Browser ──HTTPS──> Vercel (React + Tailwind)
-   │
-   └──HTTPS──> Caddy (443) ──> FastAPI backend (Docker on EC2)
-                                   │
-                                   └──> Supabase (Postgres + Storage)
-```
+Reviewing EEG recordings for seizure activity is time-consuming and demanding. A single recording can last hours, and neurologists must manually scan through the entire signal to identify suspicious segments. Without decision support, potential consequences include:
 
-| Layer | Tech |
+- Delayed identification of seizure activity
+- Increased workload for neurologists
+- Longer patient waiting times
+- Difficulty prioritizing urgent cases
+
+---
+
+## The Solution
+
+NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity — ranked by urgency, so clinicians know exactly where to look first.
+
+Doctors review only the flagged segments, label them, and those labels feed back into the system to continuously improve the model over time.
+
+---
+
+## Who Benefits?
+
+| Role | How NeuroTriage helps |
 |---|---|
-| Frontend | React 19, Tailwind CSS 4, Vite |
-| Backend | FastAPI, Python 3.10, PyTorch (CPU), MNE |
-| Database | Supabase (Postgres + object storage) |
-| Auth | JWT (role-based: `doctor` / `admin`) |
-| ML Model | `EEGCNN1D` — 3-layer 1D CNN, 22 channels |
-| Infra | Docker, Caddy (auto-TLS), AWS EC2, Vercel |
-| CI | GitHub Actions |
+| **Neurologists** | Spend less time scanning, more time deciding |
+| **Hospital administrators** | Faster turnaround, better resource allocation |
+| **Patients** | Quicker diagnosis and prioritization of urgent cases |
+| **Research teams** | Structured feedback loop for ongoing model improvement |
 
 ---
 
-## Features
+## How Does It Work?
 
-- **EDF upload & scoring** — processes recordings into 7s overlapping windows, scores each with the CNN, flags windows above a configurable threshold
-- **Triage tiers** — `urgent` (≥ 0.95) and `review` (≥ threshold) to prioritize doctor attention
-- **Doctor feedback loop** — doctors label flagged windows; labels feed the retraining pipeline
-- **Model versioning** — multiple model versions tracked in `model_config.json`; admin can retrain and activate versions
-- **Patient management** — create/delete patients, attach recordings, browse history
-- **MLflow tracking** — retrain runs logged with metrics and artifacts
+1. A doctor uploads an EEG recording (EDF format) for a patient
+2. The AI model scans the recording in 7-second windows across 22 brain channels
+3. Each window is scored for seizure probability (0–100%)
+4. Results are ranked — **🔴 Urgent** (≥ 95% confidence) and **🟡 Review** (above threshold)
+5. The doctor reviews flagged segments and labels them
+6. Labels feed back into the model, which improves with every retraining cycle
 
 ---
 
-## Quick Start (Docker)
+## Workflow
 
-```bash
-# 1. Clone and configure
-git clone <repo-url> eeg && cd eeg
-cp .env.example .env
-# Edit .env — set SUPABASE_URL, SUPABASE_KEY, DOCTOR_PASSWORD, ADMIN_PASSWORD, JWT_SECRET
-
-# 2. Start backend + frontend
-docker compose up --build
-
-# Backend:  http://localhost:8000
-# Frontend: http://localhost:80
 ```
-
-In your **Supabase dashboard**, create a private storage bucket named `eeg-recordings`.
-
----
-
-## Local Development
-
-### Backend
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt -r requirements-dev.txt
-
-uvicorn backend:app --reload
-# → http://localhost:8000
-```
-
-### Frontend
-
-```bash
-cd eeg-triage
-npm install
-npm run dev
-# → http://localhost:5173
+Upload EDF recording
+        ↓
+AI scans 7-second windows across 22 EEG channels
+        ↓
+Flags suspicious segments (ranked by urgency)
+        ↓
+Neurologist reviews & labels flagged windows
+        ↓
+Labels stored in database
+        ↓
+Admin triggers retraining from Admin Panel
+        ↓
+New model version evaluated against baseline
+        ↓
+Admin reviews metrics → Activates new version if better
+        ↓
+Doctors now use the improved model
 ```
 
 ---
 
-## Environment Variables
+## Why Should You Trust It?
 
-Copy `.env.example` to `.env` and fill in:
+- **Clinician-in-the-loop** — the model never makes a final decision. Every result requires a doctor's review and confirmation
+- **Transparent model versioning** — every model version is tracked with its training date, sample count, recall, specificity, and F1 score
+- **Gated promotion** — a new model version cannot replace the active one unless it meets evaluation criteria. Worse-performing versions are blocked by default
+- **Audit trail** — every upload, label, and model activation is logged against a patient record
 
-| Variable | Description |
+---
+
+## Impact
+
+- Reduces the time neurologists spend manually scanning recordings
+- Surfaces the most urgent cases first, enabling faster clinical decisions
+- Creates a structured feedback loop that improves detection accuracy over time
+- Provides a foundation for scalable, AI-assisted neurological triage
+
+---
+
+## Results
+
+Current model versions tracked in the system:
+
+| Version | Type | Recall | Specificity | F1 | Status |
+|---|---|---|---|---|---|
+| v2 | Retrained | — | — | — | Active |
+| v3 | Retrained | 16.7% | 100.0% | 28.6% | Inactive |
+
+The model continues to improve as doctors submit more labeled feedback.
+
+---
+
+## The Dataset — CHB-MIT Scalp EEG
+
+The model was trained on the **CHB-MIT Scalp EEG Database**, a publicly available dataset from Children's Hospital Boston and MIT.
+
+- **Subjects:** 22 pediatric patients with intractable seizures
+- **Recordings:** Continuous scalp EEG, sampled at 256 Hz
+- **Channels:** 22-channel bipolar montage (standard 10–20 system)
+- **Labels:** Precise seizure onset and offset times annotated by clinicians
+- **Split used:** 12 patients for training, 12 patients for testing
+- **Class imbalance:** Seizure windows are rare (~1–5% of total), addressed with weighted loss (seizure weight: 20×)
+
+The dataset represents real clinical EEG recordings from pediatric patients, making it a relevant starting point for seizure detection research.
+
+---
+
+## The AI Model — EEGCNN1D
+
+### Architecture
+
+The model is a custom **1D Convolutional Neural Network** designed specifically for time-series EEG data. Unlike image-based approaches, 1D convolutions directly process the raw temporal signal across all EEG channels simultaneously.
+
+```
+Input: [batch, 22 channels, 1792 time samples]
+        ↓
+Conv1D(22→32, kernel=7) + BatchNorm + ReLU + MaxPool(4)
+        ↓
+Conv1D(32→64, kernel=5) + BatchNorm + ReLU + MaxPool(4)
+        ↓
+Conv1D(64→128, kernel=3) + BatchNorm + ReLU
+        ↓
+AdaptiveAvgPool → [batch, 128, 16]
+        ↓
+Flatten → [batch, 2048]
+        ↓
+Dropout(0.4) → FC(2048→64) → ReLU
+        ↓
+Dropout(0.3) → FC(64→2)
+        ↓
+Output: [batch, 2] — softmax → seizure probability
+```
+
+### Hyperparameters
+
+| Parameter | Value |
 |---|---|
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_KEY` | Supabase service role key |
-| `DOCTOR_PASSWORD` | Login password for doctor role |
-| `ADMIN_PASSWORD` | Login password for admin role |
-| `JWT_SECRET` | Secret for signing JWTs (`openssl rand -hex 32`) |
-| `JWT_EXPIRY_HOURS` | Token lifetime in hours (default: 12) |
-| `CORS_ORIGINS` | Comma-separated list of allowed frontend origins |
-| `DOMAIN` | Your API domain (production only, used by Caddy) |
-| `ACME_EMAIL` | Email for Let's Encrypt certificate (production only) |
+| Architecture | EEGCNN1D (3 ConvBlocks + FC classifier) |
+| Trainable parameters | ~300,000 |
+| Input channels | 22-channel bipolar EEG |
+| Input length | 1792 samples (7.0 seconds @ 256 Hz) |
+| Window overlap | 30% |
+| Frequency filter | 0.5–40 Hz Bandpass + 60 Hz Notch |
+| Dataset split | 12 train / 12 test patients (CHB-MIT) |
+| Batch size | 8 |
+| Loss function | Weighted CrossEntropyLoss (Seizure Weight: 20×) |
+| Optimizer | Adam |
+| Learning rate | 0.001 (initial training), 0.0001 (fine-tuning) |
+| Epochs | 13 (initial), 5 (fine-tuning per retrain) |
+
+### Weights
+
+Model weights are stored as `.pth` files in the `model/` directory, versioned as `eegcnn1d_weights_v1.pth`, `eegcnn1d_weights_v2.pth`, etc. The active version is tracked in `model_config.json`.
+
+### Preprocessing & Inference Pipeline
+
+When an EDF recording is uploaded, the following happens before the model sees any data:
+
+1. **Channel selection** — 22 standard bipolar channels are selected from the recording (e.g. FP1-F7, F7-T7, FZ-CZ). Recordings with fewer than 18 matching channels are rejected
+2. **Bandpass filter** — 0.5–40 Hz FIR filter removes slow drift and high-frequency noise
+3. **Notch filter** — 60 Hz filter removes power line interference
+4. **Sliding windows** — the signal is sliced into 7-second windows with 30% overlap, generating hundreds of windows per recording
+5. **Zero-padding** — if a recording has fewer than 22 channels, missing channels are zero-padded to maintain consistent input shape
+6. **Z-score normalisation** — each window is normalised using the training set mean and standard deviation (`train_mean.npy`, `train_std.npy`)
+7. **Inference** — all windows are passed through the model in a single batch. Softmax probabilities for the seizure class are extracted
+8. **Thresholding** — windows above the doctor's chosen threshold are flagged. Windows ≥ 0.95 are marked **Urgent**, the rest **Review**
+9. **Ranking** — flagged windows are sorted by score (highest first) so the most suspicious moments appear at the top
+
+### Retraining Mechanism
+
+NeuroTriage includes a full feedback-driven retraining loop:
+
+**How it works:**
+
+1. **Feedback collection** — when a doctor labels a flagged window (seizure / not seizure), that label is stored in the database linked to the exact EDF timestamp and recording
+2. **Dataset construction** — when retraining is triggered, the system downloads the original EDF files from storage, re-processes them, and aligns doctor labels to the closest matching window
+3. **Stratified split** — feedback data is split 80% train / 20% validation, stratified by class
+4. **Fine-tuning** — a deep copy of the current active model is fine-tuned on the feedback dataset using Adam (LR=0.0001, 5 epochs, batch size 8). A class-weighted loss is applied to handle the natural imbalance between seizure and normal windows
+5. **Evaluation** — the fine-tuned model is evaluated on the held-out validation set. Metrics computed: accuracy, recall, precision, specificity, F1, confusion matrix
+6. **Versioning** — the new weights are saved as the next version (e.g. `v4`) and recorded in `model_config.json` with metrics. The active model is unchanged
+7. **Promotion gate** — before an admin can activate a new version, the system checks that recall ≥ baseline recall AND specificity ≥ baseline specificity (with 2% tolerance). A version that performs worse is blocked from activation unless force-overridden
+8. **Activation** — the admin reviews the metrics table in the Admin Panel, compares versions, and clicks **Activate** on the version they want doctors to use. The active model is hot-swapped without restarting the server
+
+**Minimum samples required:** 25 labeled feedback windows (configurable via `RETRAIN_MIN_SAMPLES` env var).
+
+**MLflow tracking:** every retraining run is logged to MLflow with parameters, metrics, and artifacts for full experiment reproducibility.
 
 ---
 
-## API Reference
+## Admin Controls
 
-| Method | Endpoint | Role | Description |
-|---|---|---|---|
-| `GET` | `/health` | public | Health check |
-| `POST` | `/login` | public | Returns JWT token + role |
-| `GET` | `/patients` | doctor/admin | List all patients |
-| `POST` | `/patients` | doctor/admin | Create patient |
-| `DELETE` | `/patients/{id}` | doctor/admin | Delete patient + recordings |
-| `POST` | `/patients/{id}/upload` | doctor/admin | Upload EDF, returns flagged windows |
-| `GET` | `/patients/{id}/recordings` | doctor/admin | List recordings for patient |
-| `GET` | `/recordings/{id}/windows` | doctor/admin | Get flagged windows for recording |
-| `POST` | `/feedback` | doctor/admin | Submit doctor label for a window |
-| `POST` | `/retrain` | admin | Trigger model retraining |
-| `GET` | `/models` | admin | List model versions |
-| `POST` | `/models/activate` | admin | Activate a model version |
+Administrators have elevated access beyond what doctors see:
+
+- **Model versions panel** — view all trained versions with their metrics side by side
+- **Retrain Model** — trigger a new fine-tuning run from accumulated doctor feedback
+- **Activate version** — choose which model version is deployed to doctors. The promotion gate must pass (or be force-overridden)
+- **Patient management** — full access to all patients and recordings
 
 ---
 
-## ML Model
+## Limitations
 
-**`EEGCNN1D`** — a 3-layer 1D convolutional network:
+NeuroTriage is a clinical decision support tool, not a diagnostic system.
 
-- Input: 22 EEG channels × 1792 time samples (7 seconds at 256 Hz)
-- Conv layers: 32 → 64 → 128 filters with batch norm and max pooling
-- Output: 2-class softmax (seizure / non-seizure)
-
-**Preprocessing pipeline:**
-1. Channel selection (22 standard bipolar channels)
-2. Bandpass filter: 0.5–40 Hz
-3. Notch filter: 60 Hz
-4. Sliding windows: 7s, 30% overlap
-5. Z-score normalization using training mean/std
-
-**Retraining:** Admin triggers `/retrain` → feedback labels from Supabase are merged with original training data → new version saved → promote via `/models/activate` (gated by evaluation metrics).
+- **Not intended for standalone diagnosis** — all results must be reviewed by a qualified clinician
+- **Requires clinician review** — the AI flags; the doctor decides
+- **Trained on publicly available EEG datasets** — specifically the CHB-MIT scalp EEG dataset (pediatric patients)
+- **Performance may vary across patient populations** — the model has not been validated across all demographics, EEG equipment types, or adult populations
 
 ---
 
-## CI / CD
+## Setup & Installation
 
-GitHub Actions runs on every push and pull request to `main`:
-
-1. **`test` job** — installs CPU PyTorch, project dependencies, then runs `pytest tests/ -v`
-2. **`docker-build` job** — builds both the backend and frontend Docker images (no push)
-
-The `docker-build` job only runs if tests pass.
-
-See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the full workflow.
+For technical setup instructions — local development, Docker, environment variables, and production deployment — see **[SETUP.md](SETUP.md)**.
 
 ---
 
@@ -152,40 +231,21 @@ See [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the full workflow
 
 ```
 eeg/
-├── backend.py            # FastAPI app, all API routes
-├── eeg_core.py           # Model definition, EDF processing, inference
-├── retrain.py            # Retraining pipeline, model versioning
-├── preprocessing.py      # Preprocessing utilities
-├── inference.py          # Standalone inference script
-├── model/                # Model weights + config (bind-mounted in Docker)
-├── ml/                   # Training scripts and datasets
-├── tests/                # Pytest test suite
-├── eeg-triage/           # React frontend (Vite + Tailwind)
-│   └── src/
-│       └── components/   # Login, Dashboard, FileUpload, AdminPanel, etc.
-├── docker-compose.yml         # Local dev compose
-├── docker-compose.prod.yml    # Production compose (with Caddy)
-├── Caddyfile             # Reverse proxy + auto-TLS config
-└── .github/workflows/    # CI pipeline
+├── backend.py                 # FastAPI API server
+├── eeg_core.py                # Model definition, EDF processing, inference
+├── retrain.py                 # Feedback-driven retraining pipeline
+├── preprocessing.py           # Preprocessing utilities
+├── model/                     # Model weights + config (versioned)
+├── ml/                        # Offline training scripts + datasets
+├── eeg-triage/                # React frontend (NeuroTriage UI)
+├── docker-compose.yml         # Local Docker setup
+├── docker-compose.prod.yml    # Production setup (Caddy + HTTPS)
+├── SETUP.md                   # Installation & deployment guide
+└── DEPLOY.md                  # Detailed production deployment guide
 ```
 
 ---
 
-## Deployment
+## CI / CD
 
-Full production deployment guide: [DEPLOY.md](DEPLOY.md)
-
-**Summary:**
-- Backend: Docker on AWS EC2 (`t3.medium` recommended) behind Caddy for HTTPS
-- Frontend: Deploy `eeg-triage/` to Vercel with `VITE_BACKEND_URL` pointing to your API domain
-- Database: Supabase (managed Postgres + private storage bucket)
-
----
-
-## Running Tests
-
-```bash
-pytest tests/ -v
-```
-
-Tests cover the API endpoints and retraining pipeline. See `tests/` for details.
+GitHub Actions automatically builds and validates both the backend and frontend Docker images on every push and pull request to `main`. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
