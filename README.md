@@ -249,3 +249,50 @@ eeg/
 ## CI / CD
 
 GitHub Actions automatically builds and validates both the backend and frontend Docker images on every push and pull request to `main`. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| **Frontend** | React 19 | UI framework |
+| | Tailwind CSS 4 | Styling |
+| | Vite 8 | Build tooling |
+| | Vercel | Hosting + CDN |
+| **Backend** | FastAPI | REST API server |
+| | Python 3.10 | Runtime |
+| | PyTorch (CPU) | Model inference + retraining |
+| | MNE | EEG file parsing and signal processing |
+| | Uvicorn | ASGI server |
+| **Database** | Supabase (Postgres) | Patient, recording, and feedback data |
+| | Supabase Storage | EDF file storage |
+| **Auth** | PyJWT | JWT-based authentication |
+| | Role-based access | Doctor and Admin roles |
+| **ML** | EEGCNN1D (custom) | Seizure detection model |
+| | CHB-MIT dataset | Training data |
+| | MLflow | Experiment tracking |
+| **Infrastructure** | Docker | Containerisation |
+| | Docker Compose | Local and production orchestration |
+| | Caddy | Reverse proxy + automatic TLS (Let's Encrypt) |
+| | AWS EC2 | Backend hosting |
+| **CI/CD** | GitHub Actions | Automated Docker builds on every push |
+
+---
+
+## Learning Journal
+
+All learnings accumulated during the development of this project — covering topics like MLOps, data versioning, pipeline design, deployment, platform differences, and EEG signal processing — are documented in the [`journaling/`](journaling/) folder.
+
+| File | Topic |
+|---|---|
+| [`journal.md`](journaling/journal.md) | General development journal and notes |
+| [`learning.md`](journaling/learning.md) | Key learnings across the project |
+| [`HOW_IT_WORKS.md`](journaling/HOW_IT_WORKS.md) | How the system works end to end |
+| [`workflow.md`](journaling/workflow.md) | Development and ML workflow notes |
+| [`PIPELINE_CHANGES.md`](journaling/PIPELINE_CHANGES.md) | Changes made to the ML pipeline |
+| [`PIPELINE_FIXES (1).md`](<journaling/PIPELINE_FIXES (1).md>) | Pipeline bug fixes and resolutions |
+| [`DVC_GUIDE.md`](journaling/DVC_GUIDE.md) | Data Version Control guide |
+| [`DOWNLOAD_SPEEDUP (1).md`](<journaling/DOWNLOAD_SPEEDUP (1).md>) | Dataset download optimisation notes |
+| [`PLATFORMS.md`](journaling/PLATFORMS.md) | Notes on platform-specific differences |
+| [`context.md`](journaling/context.md) | Project context and background |
