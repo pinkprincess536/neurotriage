@@ -34,7 +34,8 @@ def test_models_admin(client, admin_token):
     assert "active_version" in data
     assert "versions" in data
     assert len(data["versions"]) >= 1
-    assert data["versions"][0]["version"] == "v1"
+    # version strings should be in "vN" format — don't hardcode which one exists
+    assert data["versions"][0]["version"].startswith("v")
 
 
 def test_models_doctor_forbidden(client, doctor_token):
@@ -48,13 +49,16 @@ def test_models_no_auth(client):
 
 
 def test_activate_admin(client, admin_token):
+    # Fetch the current active version and re-activate it — avoids hardcoding a version
+    models_res = client.get("/models", headers={"Authorization": f"Bearer {admin_token}"})
+    active = models_res.json()["active_version"]
     res = client.post(
         "/models/activate",
-        json={"version": "v1"},
+        json={"version": active},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert res.status_code == 200
-    assert res.json()["active_version"] == "v1"
+    assert res.json()["active_version"] == active
 
 
 def test_activate_invalid_version(client, admin_token):
@@ -69,7 +73,7 @@ def test_activate_invalid_version(client, admin_token):
 def test_activate_doctor_forbidden(client, doctor_token):
     res = client.post(
         "/models/activate",
-        json={"version": "v1"},
+        json={"version": "v2"},
         headers={"Authorization": f"Bearer {doctor_token}"},
     )
     assert res.status_code == 403

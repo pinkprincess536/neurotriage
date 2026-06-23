@@ -179,6 +179,20 @@ async def delete_patient(patient_id: int, request: Request):
     return {"status": "deleted"}
 
 
+@app.get("/recordings/{recording_id}/windows")
+def get_recording_windows(recording_id: int, request: Request):
+    require_session(request)
+    # Get the flagged windows stored as feedback entries for this recording
+    feedback_res = (
+        supabase.table("feedback")
+        .select("id, timestamp_sec, model_score, doctor_label, created_at")
+        .eq("recording_id", recording_id)
+        .order("timestamp_sec")
+        .execute()
+    )
+    return {"windows": feedback_res.data, "recording_id": recording_id}
+
+
 @app.get("/patients/{patient_id}/recordings")
 def get_patient_recordings(patient_id: int, request: Request):
     require_session(request)
@@ -250,6 +264,20 @@ async def upload_for_patient(patient_id: int, file: UploadFile, request: Request
         }).execute()
 
         recording_id = rec.data[0]["id"]
+        current_ver = get_active_version("model/")
+
+        # Save each flagged window so history is persisted
+        if results:
+            supabase.table("feedback").insert([
+                {
+                    "recording_id": recording_id,
+                    "timestamp_sec": r["timestamp_sec"],
+                    "model_score": r["score"],
+                    "doctor_label": None,   # null = not yet reviewed
+                    "model_version": current_ver,
+                }
+                for r in results
+            ]).execute()
 
         window_sec = 7.0
         stride_sec = window_sec * (1 - 0.3)
@@ -277,13 +305,34 @@ async def save_feedback(request: Request):
     data = await request.json()
     current_ver = get_active_version("model/")
 
-    supabase.table("feedback").insert({
-        "recording_id": data["recording_id"],
-        "timestamp_sec": data["timestamp_sec"],
-        "model_score": data["score"],
-        "doctor_label": data["label"],
-        "model_version": current_ver,
-    }).execute()
+    recording_id = data["recording_id"]
+    timestamp_sec = data["timestamp_sec"]
+    label = data["label"]
+
+    # Check if a row already exists for this window (saved at upload time)
+    existing = (
+        supabase.table("feedback")
+        .select("id")
+        .eq("recording_id", recording_id)
+        .eq("timestamp_sec", timestamp_sec)
+        .execute()
+    )
+
+    if existing.data:
+        # Update the existing row with the doctor's label
+        supabase.table("feedback").update({
+            "doctor_label": label,
+            "model_version": current_ver,
+        }).eq("id", existing.data[0]["id"]).execute()
+    else:
+        # Fallback: insert new row (for older recordings without pre-saved windows)
+        supabase.table("feedback").insert({
+            "recording_id": recording_id,
+            "timestamp_sec": timestamp_sec,
+            "model_score": data["score"],
+            "doctor_label": label,
+            "model_version": current_ver,
+        }).execute()
 
     return {"status": "saved"}
 

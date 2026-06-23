@@ -17,6 +17,9 @@ export default function DoctorDashboard({ token, onLogout }) {
   // Recordings history
   const [recordings, setRecordings] = useState([]);
   const [loadingRecordings, setLoadingRecordings] = useState(false);
+  const [selectedRecording, setSelectedRecording] = useState(null);
+  const [recordingWindows, setRecordingWindows] = useState([]);
+  const [loadingWindows, setLoadingWindows] = useState(false);
 
   // Upload / process
   const [file, setFile] = useState(null);
@@ -68,8 +71,52 @@ export default function DoctorDashboard({ token, onLogout }) {
     setResults(null);
     setFile(null);
     setProcessError(null);
+    setSelectedRecording(null);
+    setRecordingWindows([]);
     loadRecordings(selectedPatientId);
   }, [selectedPatientId, loadRecordings]);
+
+  const handleRecordingClick = async (rec) => {
+    if (selectedRecording?.id === rec.id) {
+      setSelectedRecording(null);
+      setRecordingWindows([]);
+      return;
+    }
+    setSelectedRecording(rec);
+    setLoadingWindows(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/recordings/${rec.id}/windows`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecordingWindows(data.windows);
+      }
+    } catch (e) { console.error(e); }
+    finally { setLoadingWindows(false); }
+  };
+
+  const handleHistoryFeedback = async (window_, label) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          recording_id: window_.recording_id || selectedRecording.id,
+          timestamp_sec: window_.timestamp_sec,
+          score: window_.model_score,
+          label,
+        }),
+      });
+      if (!res.ok) throw new Error("failed");
+      // Update label locally
+      setRecordingWindows((prev) =>
+        prev.map((w) =>
+          w.id === window_.id ? { ...w, doctor_label: label } : w
+        )
+      );
+    } catch (e) { console.error(e); }
+  };
 
   const currentPatient = patients.find((p) => p.id === selectedPatientId) || null;
 
@@ -353,6 +400,118 @@ export default function DoctorDashboard({ token, onLogout }) {
                 </h3>
 
                 {loadingRecordings ? (
+                  <p className="text-xs text-slate-400 text-center py-6">Loading history...</p>
+                ) : recordings.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-xs text-slate-400">No recordings yet for this patient.</p>
+                    <p className="text-xs text-slate-400 mt-1">Upload an EDF file above to get started.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {recordings.map((rec) => {
+                      const isExpanded = selectedRecording?.id === rec.id;
+                      return (
+                        <div key={rec.id} className="border border-slate-100 rounded-2xl overflow-hidden">
+                          {/* Recording row — clickable */}
+                          <button
+                            type="button"
+                            onClick={() => handleRecordingClick(rec)}
+                            className={`w-full flex items-center justify-between px-4 py-3 text-left transition ${
+                              isExpanded ? "bg-violet-50" : "bg-slate-50 hover:bg-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`p-2 rounded-lg shrink-0 ${isExpanded ? "bg-violet-100 text-violet-600" : "bg-slate-200 text-slate-500"}`}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/>
+                                </svg>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">{rec.filename}</p>
+                                <p className="text-[10px] text-slate-500 font-mono">
+                                  {new Date(rec.created_at).toLocaleDateString()} · {fmtDuration(rec.duration_sec)} · threshold {rec.threshold_used?.toFixed(2)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                rec.flagged_windows > 0 ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
+                              }`}>
+                                {rec.flagged_windows ?? 0} flagged
+                              </span>
+                              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"
+                                className={`text-slate-400 transition-transform ${isExpanded ? "rotate-90" : ""}`}>
+                                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"/>
+                              </svg>
+                            </div>
+                          </button>
+
+                          {/* Expanded windows panel */}
+                          {isExpanded && (
+                            <div className="border-t border-slate-100 px-4 py-4 bg-white">
+                              {loadingWindows ? (
+                                <p className="text-xs text-slate-400 text-center py-4">Loading windows...</p>
+                              ) : recordingWindows.length === 0 ? (
+                                <p className="text-xs text-slate-400 text-center py-4">No flagged windows for this recording.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
+                                    Flagged Windows — click to label
+                                  </p>
+                                  {recordingWindows.map((w) => {
+                                    const mins = Math.floor(w.timestamp_sec / 60);
+                                    const secs = Math.floor(w.timestamp_sec % 60);
+                                    const ts = `${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}`;
+                                    const label = w.doctor_label;
+                                    return (
+                                      <div key={w.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                          <span className="font-mono text-xs font-bold text-slate-700">{ts}</span>
+                                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                            w.model_score >= 0.95 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
+                                          }`}>
+                                            {w.model_score >= 0.95 ? "🔴 Urgent" : "🟡 Review"} · {w.model_score?.toFixed(3)}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          {label === "seizure" ? (
+                                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">
+                                              ✓ Seizure
+                                            </span>
+                                          ) : label === "normal" ? (
+                                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200">
+                                              ✗ Not seizure
+                                            </span>
+                                          ) : (
+                                            <>
+                                              <button
+                                                onClick={() => handleHistoryFeedback(w, "seizure")}
+                                                className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition"
+                                              >
+                                                ✓ Seizure
+                                              </button>
+                                              <button
+                                                onClick={() => handleHistoryFeedback(w, "normal")}
+                                                className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition"
+                                              >
+                                                ✗ Not seizure
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>                {loadingRecordings ? (
                   <p className="text-xs text-slate-400 text-center py-6">Loading history...</p>
                 ) : recordings.length === 0 ? (
                   <div className="text-center py-8">
