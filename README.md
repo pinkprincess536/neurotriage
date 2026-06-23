@@ -185,6 +185,6 @@ eeg/
 ```bash
 pytest tests/ -v
 ```
-##i've also made notes about what i learned thorughout making this you can find it in journaling <3
+## i've also made notes about what i learned throughout making this you can find it in journaling <3
 
 Tests cover the API endpoints and retraining pipeline. See `tests/` for details.
