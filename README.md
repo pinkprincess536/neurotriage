@@ -171,9 +171,7 @@ eeg/
 
 ---
 
-## Deployment
 
-Full production deployment guide: [DEPLOY.md](DEPLOY.md)
 
 **Summary:**
 - Backend: Docker on AWS EC2 (`t3.medium` recommended) behind Caddy for HTTPS
@@ -187,5 +185,6 @@ Full production deployment guide: [DEPLOY.md](DEPLOY.md)
 ```bash
 pytest tests/ -v
 ```
+##i've also made notes about what i learned thorughout making this you can find it in journaling <3
 
 Tests cover the API endpoints and retraining pipeline. See `tests/` for details.
