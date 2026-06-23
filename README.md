@@ -23,6 +23,16 @@ NeuroTriage uses a deep learning model to automatically scan EEG recordings and 
 
 Doctors review only the flagged segments, label them, and those labels feed back into the system to continuously improve the model over time.
 
+### The Platform
+
+**Login** — role is determined automatically by password. Doctors and admins get different views.
+
+> 1D CNN · 22-channel bipolar EEG · Threshold-based seizure triage · Doctor feedback → retraining loop
+
+**Doctor Dashboard** — upload an EDF recording, set detection sensitivity, process and review results.
+
+**Admin Panel** — view model versions, compare metrics, trigger retraining, and choose which model version doctors use.
+
 ---
 
 ## Who Benefits?
@@ -38,12 +48,26 @@ Doctors review only the flagged segments, label them, and those labels feed back
 
 ## How Does It Work?
 
-1. A doctor uploads an EEG recording (EDF format) for a patient
-2. The AI model scans the recording in 7-second windows across 22 brain channels
-3. Each window is scored for seizure probability (0–100%)
-4. Results are ranked — **🔴 Urgent** (≥ 95% confidence) and **🟡 Review** (above threshold)
-5. The doctor reviews flagged segments and labels them
-6. Labels feed back into the model, which improves with every retraining cycle
+1. A doctor logs in and selects a patient
+2. An EEG recording (EDF format) is uploaded via drag-and-drop
+3. The doctor sets a **detection sensitivity threshold** — balancing how many flags to surface vs. how specific they need to be
+4. The AI model scans the recording in 7-second windows across 22 brain channels
+5. Each window is scored for seizure probability (0–100%)
+6. Results are ranked — **🔴 Urgent** (≥ 95% confidence) and **🟡 Review** (above threshold)
+7. The doctor reviews flagged segments and labels them
+8. Labels feed back into the model, which improves with every retraining cycle
+
+### Detection Sensitivity
+
+The threshold slider gives clinicians direct control over the sensitivity/specificity trade-off:
+
+| Preset | Threshold | Behaviour |
+|---|---|---|
+| **Aggressive** | ~0.50 | More sensitive — flags more windows, fewer missed seizures |
+| **Balanced** | ~0.70 | Default — good trade-off (Recall ~88%, FA/hr ~224) |
+| **Conservative** | ~0.95 | More specific — fewer false alarms, may miss borderline cases |
+
+At the default threshold of **0.70**, the model achieves approximately **88% recall** with around **224 false alarms per hour** — meaning it catches most seizure activity while remaining clinically actionable.
 
 ---
 
