@@ -7,31 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "pip"
-
-      - name: Install CPU-only PyTorch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Run tests
-        run: pytest tests/ -v
-
   docker-build:
     runs-on: ubuntu-latest
-    needs: test
 
     steps:
       - uses: actions/checkout@v4

@@ -511,54 +511,6 @@ export default function DoctorDashboard({ token, onLogout }) {
                     })}
                   </div>
                 )}
-              </div>                {loadingRecordings ? (
-                  <p className="text-xs text-slate-400 text-center py-6">Loading history...</p>
-                ) : recordings.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-xs text-slate-400">No recordings yet for this patient.</p>
-                    <p className="text-xs text-slate-400 mt-1">Upload an EDF file above to get started.</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto border border-slate-100 rounded-2xl">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase text-[9px] tracking-wider">
-                          <th className="py-3 px-4">File</th>
-                          <th className="py-3 px-4">Date</th>
-                          <th className="py-3 px-4">Duration</th>
-                          <th className="py-3 px-4">Flagged</th>
-                          <th className="py-3 px-4">Threshold</th>
-                          <th className="py-3 px-4">Model</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {recordings.map((rec) => (
-                          <tr key={rec.id} className="hover:bg-slate-50/50 transition text-slate-600">
-                            <td className="py-3.5 px-4 font-mono font-medium text-slate-800 max-w-[160px] truncate">{rec.filename}</td>
-                            <td className="py-3.5 px-4 font-mono text-[10px]">
-                              {new Date(rec.created_at).toLocaleDateString()}{" "}
-                              <span className="text-slate-400">{new Date(rec.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                            </td>
-                            <td className="py-3.5 px-4 font-mono">{fmtDuration(rec.duration_sec)}</td>
-                            <td className="py-3.5 px-4">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                rec.flagged_windows > 0 ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
-                              }`}>
-                                {rec.flagged_windows ?? 0} / {rec.total_windows ?? "—"}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 font-mono">{rec.threshold_used?.toFixed(2) ?? "—"}</td>
-                            <td className="py-3.5 px-4">
-                              <span className="bg-violet-50 text-violet-700 text-[9px] font-bold px-2 py-0.5 rounded-full">
-                                {rec.model_version ?? "—"}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
               </div>
             </>
           )}
