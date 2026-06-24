@@ -143,11 +143,17 @@ def health():
 
 @app.post("/login")
 def login(data: dict):
+    role = data.get("role")
     password = data.get("password")
+
+    # Doctor: open access, no password required
+    if role == "doctor":
+        return {"token": create_token("doctor"), "role": "doctor"}
+
+    # Admin: requires the admin password
     if password == ADMIN_PASSWORD:
         return {"token": create_token("admin"), "role": "admin"}
-    if password == DOCTOR_PASSWORD:
-        return {"token": create_token("doctor"), "role": "doctor"}
+
     raise HTTPException(401, "Wrong password")
 
 
