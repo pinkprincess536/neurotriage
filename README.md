@@ -26,15 +26,11 @@ NeuroTriage uses a deep learning model to automatically scan EEG recordings and 
 
 Doctors review only the flagged segments, label them, and those labels feed back into the system to continuously improve the model over time.
 
-### The Platform
+## The Platform
 
-**Login** — role is determined automatically by password. Doctors and admins get different views.
+**Login** — role is determined automatically by password. Doctors and admins get different views. See [User Roles](#user-roles) for details.
 
 > 1D CNN · 22-channel bipolar EEG · Threshold-based seizure triage · Doctor feedback → retraining loop
-
-**Doctor Dashboard** — upload an EDF recording, set detection sensitivity, process and review results.
-
-**Admin Panel** — view model versions, compare metrics, trigger retraining, and choose which model version doctors use.
 
 ---
 
@@ -241,14 +237,24 @@ NeuroTriage includes a full feedback-driven retraining loop:
 
 ---
 
-## Admin Controls
+## User Roles
 
-Administrators have elevated access beyond what doctors see:
+NeuroTriage has two roles — the password entered at login determines which role you get.
 
-- **Model versions panel** — view all trained versions with their metrics side by side
-- **Retrain Model** — trigger a new fine-tuning run from accumulated doctor feedback
-- **Activate version** — choose which model version is deployed to doctors. The promotion gate must pass (or be force-overridden)
-- **Patient management** — full access to all patients and recordings
+### Doctor
+- Create and manage patients
+- Upload EEG recordings and run analysis
+- Review flagged windows and label them (seizure / not seizure)
+- Browse recording history per patient
+
+### Admin
+Has all doctor capabilities, plus:
+- View all trained model versions with their performance metrics side by side
+- Trigger model retraining from accumulated doctor feedback
+- Choose which model version gets deployed to doctors (with promotion gate validation)
+- Override the promotion gate if needed
+
+The admin is the gatekeeper of model quality — no new model reaches doctors without explicit admin approval.
 
 ---
 
