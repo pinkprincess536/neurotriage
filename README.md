@@ -2,7 +2,7 @@
 
 **Smart Seizure Triage & Detection Portal**
 
-> AI-assisted EEG analysis that helps neurologists find seizure activity faster — so patients get the right care sooner.
+> AI-assisted EEG analysis that helps neurologists find seizure activity faster ,so patients get the right care sooner.
 
 ---
 
@@ -22,7 +22,7 @@ Reviewing EEG recordings for seizure activity is time-consuming and demanding. A
 
 <img width="1024" height="643" alt="download" src="https://github.com/user-attachments/assets/12573d28-b8c9-46aa-b0c5-4b4a483d5bb7" />
 
-NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity — ranked by urgency, so clinicians know exactly where to look first.
+NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity ranked by urgency, so clinicians know exactly where to look first.
 
 Doctors review only the flagged segments, label them, and those labels feed back into the system to continuously improve the model over time.
 
@@ -261,7 +261,8 @@ NeuroTriage is a clinical decision support tool, not a diagnostic system.
 
 ## Setup & Installation
 
-For technical setup instructions — local development, Docker, environment variables, and production deployment — see **[SETUP.md](SETUP.md)**.
+For technical setup instructions :
+local development, Docker, environment variables, and production deployment — see **[SETUP.md](SETUP.md)**.
 
 ---
 
