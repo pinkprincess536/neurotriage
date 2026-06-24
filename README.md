@@ -20,7 +20,8 @@ Reviewing EEG recordings for seizure activity is time-consuming and demanding. A
 
 ## The Solution
 
-<img width="1024" height="643" alt="download" src="https://github.com/user-attachments/assets/12573d28-b8c9-46aa-b0c5-4b4a483d5bb7" />
+<img width="1519" height="945" alt="Screenshot_24-6-2026_142358_neurotriage-hazel vercel app" src="https://github.com/user-attachments/assets/1fb5ef4e-aa12-4ef3-b4bf-384bb81c203e" />
+
 
 NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity ranked by urgency, so clinicians know exactly where to look first.
 
