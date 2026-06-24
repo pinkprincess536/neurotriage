@@ -8,6 +8,7 @@
 
 ## The Problem
 
+
 Reviewing EEG recordings for seizure activity is time-consuming and demanding. A single recording can last hours, and neurologists must manually scan through the entire signal to identify suspicious segments. Without decision support, potential consequences include:
 
 - Delayed identification of seizure activity
@@ -18,6 +19,8 @@ Reviewing EEG recordings for seizure activity is time-consuming and demanding. A
 ---
 
 ## The Solution
+
+<img width="1024" height="643" alt="download" src="https://github.com/user-attachments/assets/12573d28-b8c9-46aa-b0c5-4b4a483d5bb7" />
 
 NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity — ranked by urgency, so clinicians know exactly where to look first.
 
@@ -56,6 +59,12 @@ Doctors review only the flagged segments, label them, and those labels feed back
 6. Results are ranked — **🔴 Urgent** (≥ 95% confidence) and **🟡 Review** (above threshold)
 7. The doctor reviews flagged segments and labels them
 8. Labels feed back into the model, which improves with every retraining cycle
+
+
+<img width="1024" height="757" alt="download" src="https://github.com/user-attachments/assets/f1699e47-d908-451b-8e09-4ba9bfc2a734" />
+
+
+   
 
 ### Detection Sensitivity
 
@@ -124,6 +133,7 @@ Current model versions tracked in the system:
 
 The model continues to improve as doctors submit more labeled feedback.
 
+
 ---
 
 ## The Dataset — CHB-MIT Scalp EEG
@@ -139,6 +149,7 @@ The model was trained on the **CHB-MIT Scalp EEG Database**, a publicly availabl
 
 The dataset represents real clinical EEG recordings from pediatric patients, making it a relevant starting point for seizure detection research.
 
+find it here: https://physionet.org/content/chbmit/1.0.0/
 ---
 
 ## The AI Model — EEGCNN1D
@@ -187,6 +198,9 @@ Output: [batch, 2] — softmax → seizure probability
 ### Weights
 
 Model weights are stored as `.pth` files in the `model/` directory, versioned as `eegcnn1d_weights_v1.pth`, `eegcnn1d_weights_v2.pth`, etc. The active version is tracked in `model_config.json`.
+
+<img width="1001" height="1023" alt="download" src="https://github.com/user-attachments/assets/fc0ae6d8-cc11-485e-a56a-6d3d6642173f" />
+
 
 ### Preprocessing & Inference Pipeline
 
@@ -306,7 +320,9 @@ GitHub Actions automatically builds and validates both the backend and frontend 
 
 ## Learning Journal
 
-All learnings accumulated during the development of this project — covering topics like MLOps, data versioning, pipeline design, deployment, platform differences, and EEG signal processing — are documented in the [`journaling/`](journaling/) folder.
+All learnings accumulated during the development of this project , covering topics like MLOps, data versioning, pipeline design, deployment, platform differences, and EEG signal processing are documented in the [`journaling/`](journaling/) folder.
+
+These were also my personal notes so have fun reading them <3
 
 | File | Topic |
 |---|---|
