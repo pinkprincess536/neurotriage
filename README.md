@@ -109,7 +109,7 @@ Doctors now use the improved model
 - **Clinician-in-the-loop** — the model never makes a final decision. Every result requires a doctor's review and confirmation
 - **Transparent model versioning** — every model version is tracked with its training date, sample count, recall, specificity, and F1 score
 - **Gated promotion** — a new model version cannot replace the active one unless it meets evaluation criteria. Worse-performing versions are blocked by default
-- **Audit trail** — every upload, label, and model activation is logged against a patient record
+- **Audit trail** - every upload, label, and model activation is logged against a patient record
 
 ---
 
@@ -228,12 +228,14 @@ NeuroTriage includes a full feedback-driven retraining loop:
 4. **Fine-tuning** — a deep copy of the current active model is fine-tuned on the feedback dataset using Adam (LR=0.0001, 5 epochs, batch size 8). A class-weighted loss is applied to handle the natural imbalance between seizure and normal windows
 5. **Evaluation** — the fine-tuned model is evaluated on the held-out validation set. Metrics computed: accuracy, recall, precision, specificity, F1, confusion matrix
 6. **Versioning** — the new weights are saved as the next version (e.g. `v4`) and recorded in `model_config.json` with metrics. The active model is unchanged
-7. **Promotion gate** — before an admin can activate a new version, the system checks that recall ≥ baseline recall AND specificity ≥ baseline specificity (with 2% tolerance). A version that performs worse is blocked from activation unless force-overridden
-8. **Activation** — the admin reviews the metrics table in the Admin Panel, compares versions, and clicks **Activate** on the version they want doctors to use. The active model is hot-swapped without restarting the server
+
+   and arguably, the most important part of this project:
+8. **Promotion gate** — before an admin can activate a new version, the system checks that recall ≥ baseline recall AND specificity ≥ baseline specificity (with 2% tolerance). A version that performs worse is blocked from activation unless force-overridden
+9. **Activation** — the admin reviews the metrics table in the Admin Panel, compares versions, and clicks **Activate** on the version they want doctors to use. The active model is hot-swapped without restarting the server
 
 **Minimum samples required:** 25 labeled feedback windows (configurable via `RETRAIN_MIN_SAMPLES` env var).
 
-**MLflow tracking:** every retraining run is logged to MLflow with parameters, metrics, and artifacts for full experiment reproducibility.
+
 
 ---
 
