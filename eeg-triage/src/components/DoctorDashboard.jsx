@@ -148,13 +148,20 @@ export default function DoctorDashboard({ token, onLogout }) {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Failed to delete");
+      if (!res.ok) {
+        let detail = `Delete failed (${res.status})`;
+        try { const err = await res.json(); detail = err.detail || detail; } catch {}
+        throw new Error(detail);
+      }
       setPatients((prev) => prev.filter((p) => p.id !== patientId));
       if (selectedPatientId === patientId) {
         const remaining = patients.filter((p) => p.id !== patientId);
         setSelectedPatientId(remaining.length > 0 ? remaining[0].id : null);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "Failed to delete patient");
+    }
     finally { setDeletingId(null); }
   };
 
@@ -301,7 +308,7 @@ export default function DoctorDashboard({ token, onLogout }) {
                   <button
                     onClick={(e) => handleDeletePatient(patient.id, e)}
                     disabled={deletingId === patient.id}
-                    className="opacity-0 group-hover:opacity-100 transition p-1 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 shrink-0"
+                    className="opacity-60 hover:opacity-100 transition p-1 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 shrink-0"
                     title="Delete patient"
                   >
                     {deletingId === patient.id ? (
