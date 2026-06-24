@@ -198,7 +198,8 @@ Output: [batch, 2] — softmax → seizure probability
 
 Model weights are stored as `.pth` files in the `model/` directory, versioned as `eegcnn1d_weights_v1.pth`, `eegcnn1d_weights_v2.pth`, etc. The active version is tracked in `model_config.json`.
 
-<img width="1001" height="1023" alt="download" src="https://github.com/user-attachments/assets/fc0ae6d8-cc11-485e-a56a-6d3d6642173f" />
+<img width="1127" height="318" alt="Screenshot_24-6-2026_142547_neurotriage-hazel vercel app" src="https://github.com/user-attachments/assets/ddc3aecc-c8fc-41be-bf48-81119bd07649" />
+
 
 
 ### Preprocessing & Inference Pipeline
