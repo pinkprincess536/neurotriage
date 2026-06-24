@@ -206,7 +206,7 @@ def get_patient_recordings(patient_id: int, request: Request):
     return {"recordings": res.data}
 
 @app.post("/patients/{patient_id}/upload")
-async def upload_for_patient(patient_id: int, file: UploadFile, request: Request, threshold: float = 0.70):
+async def upload_for_patient(patient_id: int, file: UploadFile, request: Request, threshold: float = 0.50):
     require_session(request)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".edf") as tmp:
         tmp.write(await file.read())

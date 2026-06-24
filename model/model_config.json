@@ -4,35 +4,41 @@
   "n_time_samples": 1792,
   "batch_size": 8,
   "learning_rate": 0.001,
-  "num_epochs": 10,
+  "num_epochs": 13,
   "random_seed": 42,
   "data_dir": "/kaggle/input/datasets/rebelxhearts/final-eeg-all-patients/processed",
+  "active_version": "v5",
   "versions": [
     {
-      "version": "v2",
-      "type": "retrained",
-      "created_at": "2026-06-21T09:17:11.498228+00:00",
-      "training_samples": 9
+      "version": "v1",
+      "type": "original",
+      "created_at": "2026-06-19T00:00:00Z",
+      "metrics": {
+        "accuracy": 0.7049,
+        "recall": 0.60,
+        "specificity": 0.71
+      }
     },
     {
-      "version": "v3",
-      "type": "retrained",
-      "created_at": "2026-06-21T12:00:20.212762+00:00",
-      "training_samples": 9,
+      "version": "v4",
+      "type": "original",
+      "created_at": "2026-06-24T00:00:00Z",
       "metrics": {
-        "accuracy": 0.4444,
-        "recall": 0.1667,
-        "precision": 1.0,
-        "specificity": 1.0,
-        "f1": 0.2857,
-        "confusion_matrix": {
-          "tp": 1,
-          "fp": 0,
-          "tn": 3,
-          "fn": 5
-        }
+        "accuracy": 0.7848,
+        "recall": 0.597,
+        "specificity": 0.787
+      }
+    },
+    {
+      "version": "v5",
+      "type": "original",
+      "created_at": "2026-06-24T00:00:00Z",
+      "training_samples": null,
+      "metrics": {
+        "accuracy": 0.7848,
+        "recall": 0.597,
+        "specificity": 0.787
       }
     }
-  ],
-  "active_version": "v2"
+  ]
 }

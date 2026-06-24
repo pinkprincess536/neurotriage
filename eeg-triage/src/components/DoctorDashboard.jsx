@@ -23,7 +23,7 @@ export default function DoctorDashboard({ token, onLogout }) {
 
   // Upload / process
   const [file, setFile] = useState(null);
-  const [threshold, setThreshold] = useState(0.70);
+  const [threshold, setThreshold] = useState(0.50);
   const [results, setResults] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [processError, setProcessError] = useState(null);

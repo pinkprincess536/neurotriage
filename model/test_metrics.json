@@ -1,6 +1,6 @@
 {
-  "test_accuracy": 93.85992964502718,
-  "sensitivity": 0.5905511811023622,
-  "specificity": 0.9533333333333334,
-  "seizure_weight": 7.5
+  "test_accuracy": 70.49,
+  "sensitivity": 0.60,
+  "specificity": 0.71,
+  "seizure_weight": 20
 }
