@@ -149,7 +149,9 @@ The model was trained on the **CHB-MIT Scalp EEG Database**, a publicly availabl
 
 The dataset represents real clinical EEG recordings from pediatric patients, making it a relevant starting point for seizure detection research.
 
+```
 find it here: https://physionet.org/content/chbmit/1.0.0/
+```
 ---
 
 ## The AI Model — EEGCNN1D
