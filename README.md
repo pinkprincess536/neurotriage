@@ -2,11 +2,12 @@
 
 **Smart Seizure Triage & Detection Portal**
 
-> AI-assisted EEG analysis that helps neurologists find seizure activity faster — so patients get the right care sooner.
+> AI-assisted EEG analysis that helps neurologists find seizure activity faster ,so patients get the right care sooner.
 
 ---
 
 ## The Problem
+
 
 Reviewing EEG recordings for seizure activity is time-consuming and demanding. A single recording can last hours, and neurologists must manually scan through the entire signal to identify suspicious segments. Without decision support, potential consequences include:
 
@@ -19,7 +20,9 @@ Reviewing EEG recordings for seizure activity is time-consuming and demanding. A
 
 ## The Solution
 
-NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity — ranked by urgency, so clinicians know exactly where to look first.
+<img width="1024" height="643" alt="download" src="https://github.com/user-attachments/assets/12573d28-b8c9-46aa-b0c5-4b4a483d5bb7" />
+
+NeuroTriage uses a deep learning model to automatically scan EEG recordings and flag the moments most likely to contain seizure activity ranked by urgency, so clinicians know exactly where to look first.
 
 Doctors review only the flagged segments, label them, and those labels feed back into the system to continuously improve the model over time.
 
@@ -52,6 +55,12 @@ Doctors review only the flagged segments, label them, and those labels feed back
 6. Results are ranked — **🔴 Urgent** (≥ 95% confidence) and **🟡 Review** (above threshold)
 7. The doctor reviews flagged segments and labels them
 8. Labels feed back into the model, which improves with every retraining cycle
+
+
+<img width="1024" height="757" alt="download" src="https://github.com/user-attachments/assets/f1699e47-d908-451b-8e09-4ba9bfc2a734" />
+
+
+   
 
 ### Detection Sensitivity
 
@@ -96,7 +105,7 @@ Doctors now use the improved model
 - **Clinician-in-the-loop** — the model never makes a final decision. Every result requires a doctor's review and confirmation
 - **Transparent model versioning** — every model version is tracked with its training date, sample count, recall, specificity, and F1 score
 - **Gated promotion** — a new model version cannot replace the active one unless it meets evaluation criteria. Worse-performing versions are blocked by default
-- **Audit trail** — every upload, label, and model activation is logged against a patient record
+- **Audit trail** - every upload, label, and model activation is logged against a patient record
 
 ---
 
@@ -120,6 +129,7 @@ Current model versions tracked in the system:
 
 The model continues to improve as doctors submit more labeled feedback.
 
+
 ---
 
 ## The Dataset — CHB-MIT Scalp EEG
@@ -135,6 +145,9 @@ The model was trained on the **CHB-MIT Scalp EEG Database**, a publicly availabl
 
 The dataset represents real clinical EEG recordings from pediatric patients, making it a relevant starting point for seizure detection research.
 
+```
+find it here: https://physionet.org/content/chbmit/1.0.0/
+```
 ---
 
 ## The AI Model — EEGCNN1D
@@ -184,6 +197,9 @@ Output: [batch, 2] — softmax → seizure probability
 
 Model weights are stored as `.pth` files in the `model/` directory, versioned as `eegcnn1d_weights_v1.pth`, `eegcnn1d_weights_v2.pth`, etc. The active version is tracked in `model_config.json`.
 
+<img width="1001" height="1023" alt="download" src="https://github.com/user-attachments/assets/fc0ae6d8-cc11-485e-a56a-6d3d6642173f" />
+
+
 ### Preprocessing & Inference Pipeline
 
 When an EDF recording is uploaded, the following happens before the model sees any data:
@@ -210,12 +226,14 @@ NeuroTriage includes a full feedback-driven retraining loop:
 4. **Fine-tuning** — a deep copy of the current active model is fine-tuned on the feedback dataset using Adam (LR=0.0001, 5 epochs, batch size 8). A class-weighted loss is applied to handle the natural imbalance between seizure and normal windows
 5. **Evaluation** — the fine-tuned model is evaluated on the held-out validation set. Metrics computed: accuracy, recall, precision, specificity, F1, confusion matrix
 6. **Versioning** — the new weights are saved as the next version (e.g. `v4`) and recorded in `model_config.json` with metrics. The active model is unchanged
-7. **Promotion gate** — before an admin can activate a new version, the system checks that recall ≥ baseline recall AND specificity ≥ baseline specificity (with 2% tolerance). A version that performs worse is blocked from activation unless force-overridden
-8. **Activation** — the admin reviews the metrics table, compares versions, and activates the one they want doctors to use. The active model is hot-swapped without restarting the server
+
+   and arguably, the most important part of this project:
+8. **Promotion gate** — before an admin can activate a new version, the system checks that recall ≥ baseline recall AND specificity ≥ baseline specificity (with 2% tolerance). A version that performs worse is blocked from activation unless force-overridden
+9. **Activation** — the admin reviews the metrics table in the Admin Panel, compares versions, and clicks **Activate** on the version they want doctors to use. The active model is hot-swapped without restarting the server
 
 **Minimum samples required:** 25 labeled feedback windows (configurable via `RETRAIN_MIN_SAMPLES` env var).
 
-**MLflow tracking:** every retraining run is logged to MLflow with parameters, metrics, and artifacts for full experiment reproducibility.
+
 
 ---
 
@@ -253,7 +271,8 @@ NeuroTriage is a clinical decision support tool, not a diagnostic system.
 
 ## Setup & Installation
 
-For technical setup instructions — local development, Docker, environment variables, and production deployment — see **[SETUP.md](SETUP.md)**.
+For technical setup instructions :
+local development, Docker, environment variables, and production deployment — see **[SETUP.md](SETUP.md)**.
 
 ---
 
@@ -312,7 +331,9 @@ GitHub Actions automatically builds and validates both the backend and frontend 
 
 ## Learning Journal
 
-All learnings accumulated during the development of this project — covering topics like MLOps, data versioning, pipeline design, deployment, platform differences, and EEG signal processing — are documented in the [`journaling/`](journaling/) folder.
+All learnings accumulated during the development of this project , covering topics like MLOps, data versioning, pipeline design, deployment, platform differences, and EEG signal processing are documented in the [`journaling/`](journaling/) folder.
+
+These were also my personal notes so have fun reading them <3
 
 | File | Topic |
 |---|---|
