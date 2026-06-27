@@ -1,7 +1,7 @@
 # NeuroTriage
 
 **Smart Seizure Triage & Detection Portal**
-
+>https://neurotriage-hazel.vercel.app/
 > AI-assisted EEG analysis that helps neurologists find seizure activity faster ,so patients get the right care sooner.
 
 ---
